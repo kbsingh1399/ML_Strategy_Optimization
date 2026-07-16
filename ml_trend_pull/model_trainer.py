@@ -34,7 +34,8 @@ NUM_LEAVES = getattr(_ub_mod, 'NUM_LEAVES', 31)
 MAX_BARS = getattr(_ub_mod, 'MAX_BARS', 96)
 build_labels_fast = _ub_mod.build_labels_fast
 
-DATA_DIR = r'G:\My Drive\_Trading_Data\15m\parquet'
+local_backtest_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backtesting_data"))
+DATA_DIR = local_backtest_dir if os.path.exists(local_backtest_dir) else r'G:\My Drive\_Trading_Data\15m\parquet'
 MODEL_DIR = os.path.join(_DIR, "models")
 os.makedirs(MODEL_DIR, exist_ok=True)
 

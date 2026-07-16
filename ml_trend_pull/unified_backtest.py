@@ -22,7 +22,8 @@ spec.loader.exec_module(compiled_module)
 globals().update(compiled_module.__dict__)
 
 # Apply directory path override to point to the correct Google Drive folder
-PQ_DIR = r"G:\My Drive\_Trading_Data\15m\parquet"
+local_backtest_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backtesting_data"))
+PQ_DIR = local_backtest_dir if os.path.exists(local_backtest_dir) else r"G:\My Drive\_Trading_Data\15m\parquet"
 compiled_module.PQ_DIR = PQ_DIR
 
 # Define custom indicators for ML_Trend_Pull
