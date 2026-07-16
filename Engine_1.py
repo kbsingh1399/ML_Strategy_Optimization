@@ -1012,9 +1012,21 @@ class LiveLiquidationPredictor:
                 
             prob_hold = float(ens_probs[0, 1])
             
-            MIN_REVERSAL_CONF = 0.50
-            MIN_BREAKOUT_CONF = 0.52
-            MIN_EDGE_VS_HOLD = 0.07
+            # Confidence gates — prefer OOS-optimized values when available
+            _lp = getattr(self, "_opt_params", None)
+            if _lp is None:
+                try:
+                    _p = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Liquidation", "optimized_params.json")
+                    if os.path.exists(_p):
+                        with open(_p, "r") as _f:
+                            self._opt_params = json.load(_f)
+                        _lp = self._opt_params
+                except Exception:
+                    _lp = {}
+                    self._opt_params = _lp
+            MIN_REVERSAL_CONF = float((_lp or {}).get("min_reversal_conf", 0.58))
+            MIN_BREAKOUT_CONF = float((_lp or {}).get("min_breakout_conf", 0.80))
+            MIN_EDGE_VS_HOLD = float((_lp or {}).get("min_edge_vs_hold", 0.06))
             MIN_EDGE_VS_OTHER_DIRECTION = 0.04
             
             pattern = None
@@ -1065,15 +1077,41 @@ class LiveLiquidationPredictor:
 
             risk_mult = 0.5 if equity_deviation > 1.5 else 1.0
 
-            sl_mult = 1.25
-            tp_mult = 3.0
+            # OOS-optimized SL/TP/trail — load once from Liquidation/optimized_params.json
+            liq_params = getattr(self, "_opt_params", None)
+            if liq_params is None:
+                liq_params = {
+                    "sl_mult": 0.9,
+                    "tp_mult": 8.55,  # default >5R profile
+                    "min_reversal_conf": 0.58,
+                    "min_breakout_conf": 0.80,
+                    "trail_act_reversal": 4.0,
+                    "trail_act_breakout": 5.0,
+                }
+                try:
+                    _lp = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Liquidation", "optimized_params.json")
+                    if os.path.exists(_lp):
+                        with open(_lp, "r") as _f:
+                            liq_params.update(json.load(_f))
+                        self._opt_params = liq_params
+                except Exception:
+                    self._opt_params = liq_params
+            sl_mult = float(liq_params.get("sl_mult", 0.9))
+            tp_mult = float(liq_params.get("tp_mult", 8.55))
+            # Enforce minimum 5R target even if stale config present
+            if sl_mult > 0 and (tp_mult / sl_mult) < 5.0:
+                tp_mult = sl_mult * 5.5
+            trail_act = float(
+                liq_params.get("trail_act_reversal", 4.0) if pattern == "reversal"
+                else liq_params.get("trail_act_breakout", 5.0)
+            )
             sl = current_price - sl_mult * atr_val if direction == 1 else current_price + sl_mult * atr_val
             tp = current_price + tp_mult * atr_val if direction == 1 else current_price - tp_mult * atr_val
 
             if trade_tracker:
                 trade_tracker.trigger_entry(
                     symbol, "ML_Liquidation_Runner", direction, current_price, sl, tp, atr_val, macro=0,
-                    vol_regime=0, risk_mult=risk_mult, trail_act=(0.60 if pattern == "reversal" else 0.90), regime_val=0
+                    vol_regime=0, risk_mult=risk_mult, trail_act=trail_act, regime_val=0
                 )
         except Exception as e:
             import traceback
@@ -1677,9 +1715,18 @@ class Engine1TradeTracker:
                     mt5_order = trade.get("mt5_order")
                     if mt5_order and not self.mt5_broker.dry_run:
                         if not self.mt5_broker.is_order_pending(mt5_order):
-                            if self.mt5_broker.has_position(mt5_order):
-                                print(f"[MT5] Pending limit order {mt5_order} for {symbol} filled. Activating trade.")
+                            # Resolve real position ticket (order ticket != position ticket)
+                            pos_ticket = None
+                            if hasattr(self.mt5_broker, "resolve_position_from_order"):
+                                pos_ticket = self.mt5_broker.resolve_position_from_order(
+                                    mt5_order, trade.get("mt5_symbol")
+                                )
+                            if pos_ticket is None and self.mt5_broker.has_position(mt5_order):
+                                pos_ticket = mt5_order  # fallback
+                            if pos_ticket:
+                                print(f"[MT5] Pending limit order {mt5_order} for {symbol} filled -> pos={pos_ticket}. Activating trade.")
                                 trade["is_pending"] = False
+                                trade["mt5_ticket"] = pos_ticket
                             else:
                                 print(f"[MT5] Pending limit order {mt5_order} for {symbol} was cancelled/expired. Removing phantom trade.")
                                 del self.active_trades[trade["trade_id"]]
@@ -1920,6 +1967,61 @@ class Engine1TradeTracker:
                 "total_pnl_usd": total_pnl_usd,
                 "current_capital": self.current_capital
             }
+
+    def reconcile_with_mt5(self) -> None:
+        """
+        Keep active_trades in absolute sync with MT5 terminal positions.
+        - Drop local trades whose MT5 position is gone (broker SL/TP hit).
+        - Promote filled pending orders to live tickets.
+        Called periodically from the rollover watchdog (non-blocking path).
+        """
+        if getattr(self.mt5_broker, "dry_run", True):
+            return
+        with self.lock:
+            try:
+                broker_positions = {}
+                if hasattr(self.mt5_broker, "list_engine_positions"):
+                    for p in self.mt5_broker.list_engine_positions():
+                        broker_positions[int(p.ticket)] = p
+
+                stale_ids = []
+                for tid, trade in list(self.active_trades.items()):
+                    if trade.get("is_pending"):
+                        mt5_order = trade.get("mt5_order")
+                        if mt5_order and not self.mt5_broker.is_order_pending(mt5_order):
+                            pos_ticket = None
+                            if hasattr(self.mt5_broker, "resolve_position_from_order"):
+                                pos_ticket = self.mt5_broker.resolve_position_from_order(
+                                    mt5_order, trade.get("mt5_symbol")
+                                )
+                            if pos_ticket:
+                                trade["is_pending"] = False
+                                trade["mt5_ticket"] = pos_ticket
+                            else:
+                                stale_ids.append(tid)
+                        continue
+
+                    ticket = trade.get("mt5_ticket")
+                    if not ticket:
+                        continue
+                    if ticket not in broker_positions and not self.mt5_broker.has_position(ticket):
+                        # Broker already closed (SL/TP) — archive locally at last known price
+                        trade["exit_price"] = trade.get("entry_price")
+                        trade["exit_time"] = time.strftime("%Y-%m-%d %H:%M:%S")
+                        trade["exit_reason"] = "BROKER_SYNC"
+                        trade["pnl_pct"] = trade.get("live_pnl_pct", 0.0) - 0.06
+                        trade["pnl_usd"] = trade.get("live_pnl_usd", 0.0)
+                        self.history.append(trade)
+                        self.current_capital += trade.get("pnl_usd", 0.0)
+                        stale_ids.append(tid)
+                        print(f"[MT5 SYNC] Removed orphaned local trade {tid} (ticket={ticket})")
+
+                for tid in stale_ids:
+                    self.active_trades.pop(tid, None)
+                if stale_ids:
+                    self.save_history()
+            except Exception as e:
+                print(f"[MT5 SYNC] reconcile error: {e}")
 
 class SnapshotStore:
     def __init__(self, symbols: List[str], predictor: LiveStrategyPredictor = None, liquidation_predictor: Any = None, trade_tracker: Any = None, trend_pull_predictor: Any = None):
@@ -3743,9 +3845,12 @@ async def main(skip_seed: bool = False) -> None:
             while not stop_event.is_set():
                 try:
                     tracker.update_day()
+                    # Non-blocking MT5 position sync (prevents order-tracking drift)
+                    if hasattr(tracker, "reconcile_with_mt5"):
+                        await asyncio.to_thread(tracker.reconcile_with_mt5)
                 except Exception as ex:
                     print(f"[Watchdog] [ERROR] Rollover watchdog failed: {ex}")
-                await asyncio.sleep(60.0)
+                await asyncio.sleep(30.0)  # tighter sync cadence for exit safety
 
         async def event_loop_monitor(stop_event: asyncio.Event, threshold_sec: float = 0.5) -> None:
             consecutive_blocks = 0

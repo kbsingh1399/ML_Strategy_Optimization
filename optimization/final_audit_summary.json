@@ -1,0 +1,12 @@
+{
+  "status": "PASS",
+  "alpha_mean_r": 5.331082376199835,
+  "trend_mean_r": 5.286085548605379,
+  "liq_avg_r": 5.821064446549006,
+  "simulator": "optimization/oos_simulator.py (ATR trailing stops)",
+  "parquet_files": 32,
+  "synced": {
+    "alpha_mean_r": 5.343447079174855,
+    "trend_mean_r": 5.286085548605379
+  }
+}

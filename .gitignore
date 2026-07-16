@@ -26,3 +26,7 @@ lockfile
 .trash/
 *.log
 *.tmp
+
+# Generated local backtest data
+backtesting_data/
+.venv/

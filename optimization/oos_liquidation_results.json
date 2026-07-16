@@ -1,0 +1,172 @@
+{
+  "params": {
+    "sl_mult": 0.9,
+    "tp_mult": 8.55,
+    "min_reversal_conf": 0.58,
+    "min_breakout_conf": 0.8,
+    "trail_act_reversal": 4.0,
+    "trail_act_breakout": 5.0,
+    "trail_buf": 0.4,
+    "liq_z_min": 3.0,
+    "min_edge_vs_hold": 0.06
+  },
+  "avg_r": 5.821064446549006,
+  "total_trades": 1726,
+  "per_symbol": {
+    "BTCUSDT": {
+      "symbol": "BTCUSDT",
+      "n_trades": 120,
+      "avg_r": 5.851521936363337,
+      "total_r": 702.1826323636004,
+      "win_rate": 69.16666666666667,
+      "profit_factor": 17.177915146810577,
+      "tp_hits": 74,
+      "sl_hits": 37,
+      "trail_hits": 9
+    },
+    "ETHUSDT": {
+      "symbol": "ETHUSDT",
+      "n_trades": 130,
+      "avg_r": 5.995263963594564,
+      "total_r": 779.3843152672932,
+      "win_rate": 70.76923076923077,
+      "profit_factor": 18.526635646419436,
+      "tp_hits": 81,
+      "sl_hits": 38,
+      "trail_hits": 11
+    },
+    "SOLUSDT": {
+      "symbol": "SOLUSDT",
+      "n_trades": 124,
+      "avg_r": 5.7197729090185385,
+      "total_r": 709.2518407182988,
+      "win_rate": 67.74193548387096,
+      "profit_factor": 16.10221299764789,
+      "tp_hits": 73,
+      "sl_hits": 40,
+      "trail_hits": 11
+    },
+    "BNBUSDT": {
+      "symbol": "BNBUSDT",
+      "n_trades": 111,
+      "avg_r": 5.615336520474022,
+      "total_r": 623.3023537726165,
+      "win_rate": 66.66666666666666,
+      "profit_factor": 15.303939458190431,
+      "tp_hits": 66,
+      "sl_hits": 37,
+      "trail_hits": 8
+    },
+    "XRPUSDT": {
+      "symbol": "XRPUSDT",
+      "n_trades": 127,
+      "avg_r": 5.750937919087209,
+      "total_r": 730.3691157240756,
+      "win_rate": 68.50393700787401,
+      "profit_factor": 16.564061171794833,
+      "tp_hits": 74,
+      "sl_hits": 40,
+      "trail_hits": 13
+    },
+    "ADAUSDT": {
+      "symbol": "ADAUSDT",
+      "n_trades": 122,
+      "avg_r": 5.780514472354334,
+      "total_r": 705.2227656272287,
+      "win_rate": 68.85245901639344,
+      "profit_factor": 16.735080640206487,
+      "tp_hits": 74,
+      "sl_hits": 38,
+      "trail_hits": 10
+    },
+    "AVAXUSDT": {
+      "symbol": "AVAXUSDT",
+      "n_trades": 110,
+      "avg_r": 5.64814058096749,
+      "total_r": 621.2954639064238,
+      "win_rate": 67.27272727272727,
+      "profit_factor": 15.69851542221845,
+      "tp_hits": 66,
+      "sl_hits": 36,
+      "trail_hits": 8
+    },
+    "DOGEUSDT": {
+      "symbol": "DOGEUSDT",
+      "n_trades": 129,
+      "avg_r": 5.540818921457391,
+      "total_r": 714.7656408680034,
+      "win_rate": 65.89147286821705,
+      "profit_factor": 14.821328547503528,
+      "tp_hits": 77,
+      "sl_hits": 44,
+      "trail_hits": 8
+    },
+    "DOTUSDT": {
+      "symbol": "DOTUSDT",
+      "n_trades": 138,
+      "avg_r": 5.503083457524423,
+      "total_r": 759.4255171383704,
+      "win_rate": 65.21739130434783,
+      "profit_factor": 14.380406276080995,
+      "tp_hits": 81,
+      "sl_hits": 48,
+      "trail_hits": 9
+    },
+    "LINKUSDT": {
+      "symbol": "LINKUSDT",
+      "n_trades": 112,
+      "avg_r": 6.098792163728109,
+      "total_r": 683.0647223375482,
+      "win_rate": 72.32142857142857,
+      "profit_factor": 19.87444541257532,
+      "tp_hits": 70,
+      "sl_hits": 31,
+      "trail_hits": 11
+    },
+    "LTCUSDT": {
+      "symbol": "LTCUSDT",
+      "n_trades": 126,
+      "avg_r": 6.070640947627272,
+      "total_r": 764.9007594010362,
+      "win_rate": 71.42857142857143,
+      "profit_factor": 19.06371801784284,
+      "tp_hits": 79,
+      "sl_hits": 36,
+      "trail_hits": 11
+    },
+    "NEARUSDT": {
+      "symbol": "NEARUSDT",
+      "n_trades": 125,
+      "avg_r": 6.454447244381589,
+      "total_r": 806.8059055476986,
+      "win_rate": 75.2,
+      "profit_factor": 23.086836012334565,
+      "tp_hits": 84,
+      "sl_hits": 31,
+      "trail_hits": 10
+    },
+    "SUIUSDT": {
+      "symbol": "SUIUSDT",
+      "n_trades": 132,
+      "avg_r": 5.451382734625031,
+      "total_r": 719.5825209705041,
+      "win_rate": 65.9090909090909,
+      "profit_factor": 14.559147884071157,
+      "tp_hits": 76,
+      "sl_hits": 45,
+      "trail_hits": 11
+    },
+    "TRXUSDT": {
+      "symbol": "TRXUSDT",
+      "n_trades": 120,
+      "avg_r": 6.063364009174065,
+      "total_r": 727.6036811008878,
+      "win_rate": 71.66666666666667,
+      "profit_factor": 19.183579960867323,
+      "tp_hits": 74,
+      "sl_hits": 34,
+      "trail_hits": 12
+    }
+  },
+  "score": 1082.1064446549005
+}

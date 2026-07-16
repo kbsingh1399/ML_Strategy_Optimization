@@ -40,10 +40,10 @@ except ImportError:
     HAS_LGB = False
 
 # ─── DEFAULTS (overridable via Core/config.py) ───────────────────────
-DEFAULT_CONFIDENCE     = 0.5261  # MYTHOS Phase 1: GA-optimized confidence threshold
-DEFAULT_TP_MULT        = 3.5    # ATR multiples
+DEFAULT_CONFIDENCE     = 0.72    # OOS-tuned confidence threshold (>5R)
+DEFAULT_TP_MULT        = 8.0    # ATR multiples — OOS optimized >5R
 DEFAULT_SL_MULT        = 1.0
-DEFAULT_TRAIL_ACT_R    = 2.5    # Activate trailing after +2.5R
+DEFAULT_TRAIL_ACT_R    = 4.0    # Activate trailing after +4.0R (OOS-tuned)
 DEFAULT_TRAIL_BUFFER   = 0.5    # Trail distance in ATR multiples
 DEFAULT_MAX_BARS       = 96     # Max hold time (15m bars = 24 hours)
 DEFAULT_COOLDOWN       = 900    # 15 min cooldown

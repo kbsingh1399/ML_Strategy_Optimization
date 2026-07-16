@@ -31,10 +31,10 @@ except ImportError:
     HAS_LGB = False
 
 # ─── DEFAULTS (overridable via Core/config.py) ───────────────────────
-DEFAULT_CONFIDENCE     = 0.5261  
-DEFAULT_TP_MULT        = 5.0    # ATR multiples - Minimum 5R target as requested
+DEFAULT_CONFIDENCE     = 0.72  
+DEFAULT_TP_MULT        = 8.0    # ATR multiples - OOS optimized >5R
 DEFAULT_SL_MULT        = 1.0
-DEFAULT_TRAIL_ACT_R    = 3.0    # Activate trailing after +3.0R
+DEFAULT_TRAIL_ACT_R    = 4.0    # Activate trailing after +4.0R
 DEFAULT_TRAIL_BUFFER   = 0.5    # Trail distance in ATR multiples
 DEFAULT_MAX_BARS       = 96     # Max hold time (15m bars = 24 hours)
 DEFAULT_COOLDOWN       = 900    # 15 min cooldown

@@ -1,0 +1,13 @@
+{
+    "sl_mult": 0.9,
+    "tp_mult": 8.55,
+    "min_reversal_conf": 0.58,
+    "min_breakout_conf": 0.8,
+    "trail_act_reversal": 4.0,
+    "trail_act_breakout": 5.0,
+    "trail_buf": 0.4,
+    "liq_z_min": 3.0,
+    "min_edge_vs_hold": 0.06,
+    "target_avg_r": 5.0,
+    "updated": "2026-07-16T18:04:32.352545+00:00"
+}

@@ -1,10 +1,19 @@
 {
-    "window_size": 2,
-    "sl_mult": 0.8106079762086764,
-    "confidence": 0.5090320353298509,
-    "trail_act": 2.992947929279199,
+    "window_size": 6,
+    "sl_mult": 1.0,
+    "confidence": 0.75,
+    "trail_act": 5.0,
+    "trail_buf": 0.4,
+    "vol_regime_min": -1.0,
     "ensemble_min_votes": 2,
-    "tp_mult": 2.8539868071278613,
-    "target_month": "2026-06-01_to_2026-07-01",
-    "score": 30.814821574593736
+    "tp_mult": 9.0,
+    "target_month": "2024-06-01_to_2026-07-01",
+    "score": 1049.6153127356683,
+    "oos_avg_r": 5.191153127356683,
+    "oos_n_trades": 160,
+    "oos_win_rate": 69.375,
+    "oos_tp_hits": 78,
+    "oos_sl_hits": 49,
+    "oos_trail_hits": 31,
+    "ml_model": "lightgbm"
 }
