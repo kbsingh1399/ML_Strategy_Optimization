@@ -13,10 +13,10 @@ STRATEGY_CONFIG = {
         "DOTUSDT": {"confidence_threshold": 0.72, "tp_mult": 9.0, "sl_mult": 1.0, "trail_activation_r": 5.0, "trail_buffer_atr": 0.4},
         "ETHUSDT": {"confidence_threshold": 0.75, "tp_mult": 9.0, "sl_mult": 1.0, "trail_activation_r": 5.0, "trail_buffer_atr": 0.4},
         "LINKUSDT": {"confidence_threshold": 0.72, "tp_mult": 9.0, "sl_mult": 1.0, "trail_activation_r": 5.0, "trail_buffer_atr": 0.4},
-        "LTCUSDT": {"confidence_threshold": 0.72, "tp_mult": 9.0, "sl_mult": 1.0, "trail_activation_r": 5.0, "trail_buffer_atr": 0.4},
+        "LTCUSDT": {"confidence_threshold": 0.75, "tp_mult": 9.0, "sl_mult": 1.0, "trail_activation_r": 5.0, "trail_buffer_atr": 0.4},
         "NEARUSDT": {"confidence_threshold": 0.72, "tp_mult": 9.0, "sl_mult": 1.0, "trail_activation_r": 5.0, "trail_buffer_atr": 0.4},
-        "SOLUSDT": {"confidence_threshold": 0.75, "tp_mult": 9.0, "sl_mult": 1.0, "trail_activation_r": 5.0, "trail_buffer_atr": 0.4},
-        "SUIUSDT": {"confidence_threshold": 0.7, "tp_mult": 8.55, "sl_mult": 0.95, "trail_activation_r": 4.5, "trail_buffer_atr": 0.4},
+        "SOLUSDT": {"confidence_threshold": 0.72, "tp_mult": 9.0, "sl_mult": 1.0, "trail_activation_r": 5.0, "trail_buffer_atr": 0.4},
+        "SUIUSDT": {"confidence_threshold": 0.72, "tp_mult": 9.0, "sl_mult": 1.0, "trail_activation_r": 5.0, "trail_buffer_atr": 0.4},
         "TRXUSDT": {"confidence_threshold": 0.72, "tp_mult": 9.0, "sl_mult": 1.0, "trail_activation_r": 5.0, "trail_buffer_atr": 0.4},
         "XRPUSDT": {"confidence_threshold": 0.72, "tp_mult": 9.0, "sl_mult": 1.0, "trail_activation_r": 5.0, "trail_buffer_atr": 0.4},
     }

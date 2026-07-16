@@ -8,12 +8,12 @@
     "ensemble_min_votes": 2,
     "tp_mult": 9.0,
     "target_month": "2024-06-01_to_2026-07-01",
-    "score": 494.2470732678833,
-    "oos_avg_r": 4.667470732678833,
+    "score": 1101.196111692601,
+    "oos_avg_r": 5.716961116926011,
     "oos_n_trades": 157,
-    "oos_win_rate": 62.42038216560509,
-    "oos_tp_hits": 72,
-    "oos_sl_hits": 59,
-    "oos_trail_hits": 25,
+    "oos_win_rate": 73.88535031847134,
+    "oos_tp_hits": 87,
+    "oos_sl_hits": 41,
+    "oos_trail_hits": 29,
     "ml_model": "lightgbm"
 }

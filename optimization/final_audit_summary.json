@@ -1,12 +1,13 @@
 {
   "status": "PASS",
-  "alpha_mean_r": 5.331082376199835,
-  "trend_mean_r": 5.286085548605379,
-  "liq_avg_r": 5.821064446549006,
+  "alpha_mean_r": 5.470362831628651,
+  "trend_mean_r": 5.431987639236282,
+  "liq_avg_r": 5.943875256756958,
   "simulator": "optimization/oos_simulator.py (ATR trailing stops)",
   "parquet_files": 32,
   "synced": {
-    "alpha_mean_r": 5.343447079174855,
-    "trend_mean_r": 5.286085548605379
-  }
+    "alpha_mean_r": 5.411567477675071,
+    "trend_mean_r": 5.431987639236282
+  },
+  "merge_base": "origin/master (path conflicts resolved)"
 }

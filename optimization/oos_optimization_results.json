@@ -12,17 +12,17 @@
         },
         "metrics": {
           "symbol": "BTCUSDT",
-          "n_trades": 175,
-          "avg_r": 5.588773610384174,
-          "total_r": 978.0353818172305,
-          "win_rate": 72.0,
-          "profit_factor": 18.202880471804384,
-          "median_r": 8.804095344781006,
-          "tp_hits": 92,
-          "sl_hits": 49,
-          "trail_hits": 33
+          "n_trades": 171,
+          "avg_r": 5.507424052524123,
+          "total_r": 941.769512981625,
+          "win_rate": 72.51461988304094,
+          "profit_factor": 18.27497859569161,
+          "median_r": 8.794320308772157,
+          "tp_hits": 86,
+          "sl_hits": 47,
+          "trail_hits": 37
         },
-        "score": 1090.3773610384173
+        "score": 1084.2424052524125
       },
       "ETHUSDT": {
         "params": {
@@ -35,17 +35,17 @@
         },
         "metrics": {
           "symbol": "ETHUSDT",
-          "n_trades": 158,
-          "avg_r": 5.37025358324996,
-          "total_r": 848.5000661534937,
-          "win_rate": 71.51898734177216,
-          "profit_factor": 17.371356183781973,
-          "median_r": 7.6190676579749566,
-          "tp_hits": 76,
-          "sl_hits": 45,
-          "trail_hits": 37
+          "n_trades": 172,
+          "avg_r": 6.137632905706017,
+          "total_r": 1055.672859781435,
+          "win_rate": 78.48837209302324,
+          "profit_factor": 25.732040563020504,
+          "median_r": 8.816384571248442,
+          "tp_hits": 94,
+          "sl_hits": 37,
+          "trail_hits": 41
         },
-        "score": 1070.525358324996
+        "score": 1149.2632905706018
       },
       "SOLUSDT": {
         "params": {
@@ -58,17 +58,17 @@
         },
         "metrics": {
           "symbol": "SOLUSDT",
-          "n_trades": 157,
-          "avg_r": 5.459126160434968,
-          "total_r": 857.08280718829,
-          "win_rate": 70.70063694267516,
-          "profit_factor": 17.12523110456322,
-          "median_r": 8.808925090418152,
-          "tp_hits": 80,
-          "sl_hits": 46,
-          "trail_hits": 31
+          "n_trades": 166,
+          "avg_r": 5.994919832333699,
+          "total_r": 995.1566921673941,
+          "win_rate": 76.50602409638554,
+          "profit_factor": 22.92639977419253,
+          "median_r": 8.821127685537446,
+          "tp_hits": 98,
+          "sl_hits": 39,
+          "trail_hits": 28
         },
-        "score": 1076.4126160434967
+        "score": 1128.4919832333699
       },
       "BNBUSDT": {
         "params": {
@@ -81,17 +81,17 @@
         },
         "metrics": {
           "symbol": "BNBUSDT",
-          "n_trades": 152,
-          "avg_r": 5.528821259678601,
-          "total_r": 840.3808314711473,
-          "win_rate": 71.71052631578947,
-          "profit_factor": 17.84876734386427,
-          "median_r": 8.805889321681782,
-          "tp_hits": 77,
+          "n_trades": 176,
+          "avg_r": 5.912093651850617,
+          "total_r": 1040.5284827257085,
+          "win_rate": 75.56818181818183,
+          "profit_factor": 21.89392366659561,
+          "median_r": 8.818994550445908,
+          "tp_hits": 104,
           "sl_hits": 43,
-          "trail_hits": 32
+          "trail_hits": 28
         },
-        "score": 1083.8821259678602
+        "score": 1120.2093651850616
       },
       "XRPUSDT": {
         "params": {
@@ -104,17 +104,17 @@
         },
         "metrics": {
           "symbol": "XRPUSDT",
-          "n_trades": 132,
-          "avg_r": 4.583225528745589,
-          "total_r": 604.9857697944178,
-          "win_rate": 62.878787878787875,
-          "profit_factor": 11.63035970807852,
-          "median_r": 6.978619051293519,
-          "tp_hits": 55,
-          "sl_hits": 49,
-          "trail_hits": 27
+          "n_trades": 146,
+          "avg_r": 5.289179531825041,
+          "total_r": 772.2202116464559,
+          "win_rate": 69.86301369863014,
+          "profit_factor": 16.245536359242585,
+          "median_r": 8.794378609054345,
+          "tp_hits": 74,
+          "sl_hits": 44,
+          "trail_hits": 28
         },
-        "score": 485.0225528745589
+        "score": 1057.5179531825042
       },
       "ADAUSDT": {
         "params": {
@@ -127,17 +127,17 @@
         },
         "metrics": {
           "symbol": "ADAUSDT",
-          "n_trades": 156,
-          "avg_r": 4.799323769511523,
-          "total_r": 748.6945080437977,
-          "win_rate": 64.1025641025641,
-          "profit_factor": 12.631320128591112,
-          "median_r": 7.3257026383738255,
-          "tp_hits": 73,
-          "sl_hits": 56,
-          "trail_hits": 26
+          "n_trades": 153,
+          "avg_r": 5.795979127771109,
+          "total_r": 886.7848065489798,
+          "win_rate": 74.50980392156863,
+          "profit_factor": 20.73732525044759,
+          "median_r": 8.819482530538432,
+          "tp_hits": 86,
+          "sl_hits": 39,
+          "trail_hits": 28
         },
-        "score": 507.9323769511523
+        "score": 1108.5979127771109
       },
       "AVAXUSDT": {
         "params": {
@@ -150,17 +150,17 @@
         },
         "metrics": {
           "symbol": "AVAXUSDT",
-          "n_trades": 193,
-          "avg_r": 5.397563372180237,
-          "total_r": 1041.7297308307857,
-          "win_rate": 69.94818652849742,
-          "profit_factor": 16.454010130896798,
-          "median_r": 8.81278006128779,
-          "tp_hits": 102,
-          "sl_hits": 58,
-          "trail_hits": 31
+          "n_trades": 143,
+          "avg_r": 5.903485394007173,
+          "total_r": 844.1984113430258,
+          "win_rate": 73.42657342657343,
+          "profit_factor": 20.180379803377974,
+          "median_r": 8.817403284592267,
+          "tp_hits": 85,
+          "sl_hits": 38,
+          "trail_hits": 20
         },
-        "score": 1070.2563372180236
+        "score": 1114.6485394007173
       },
       "DOGEUSDT": {
         "params": {
@@ -173,17 +173,17 @@
         },
         "metrics": {
           "symbol": "DOGEUSDT",
-          "n_trades": 147,
-          "avg_r": 5.170447838839781,
-          "total_r": 760.0558323094479,
-          "win_rate": 68.02721088435374,
-          "profit_factor": 15.017270913039278,
-          "median_r": 8.802698674263636,
-          "tp_hits": 75,
-          "sl_hits": 47,
-          "trail_hits": 24
+          "n_trades": 132,
+          "avg_r": 5.529920737911275,
+          "total_r": 729.9495374042883,
+          "win_rate": 71.21212121212122,
+          "profit_factor": 17.61457138977839,
+          "median_r": 8.814218664398403,
+          "tp_hits": 71,
+          "sl_hits": 38,
+          "trail_hits": 21
         },
-        "score": 1043.744783883978
+        "score": 1076.6920737911275
       },
       "DOTUSDT": {
         "params": {
@@ -196,17 +196,17 @@
         },
         "metrics": {
           "symbol": "DOTUSDT",
-          "n_trades": 160,
-          "avg_r": 5.191153127356683,
-          "total_r": 830.5845003770694,
-          "win_rate": 69.375,
-          "profit_factor": 15.73319036918219,
-          "median_r": 7.481723325378354,
-          "tp_hits": 78,
-          "sl_hits": 49,
-          "trail_hits": 31
+          "n_trades": 127,
+          "avg_r": 5.370229223957952,
+          "total_r": 682.0191114426599,
+          "win_rate": 70.07874015748031,
+          "profit_factor": 16.473586195216704,
+          "median_r": 8.813690035860878,
+          "tp_hits": 67,
+          "sl_hits": 38,
+          "trail_hits": 22
         },
-        "score": 1049.6153127356683
+        "score": 1060.7229223957952
       },
       "LINKUSDT": {
         "params": {
@@ -219,17 +219,17 @@
         },
         "metrics": {
           "symbol": "LINKUSDT",
-          "n_trades": 125,
-          "avg_r": 5.5605553107727825,
-          "total_r": 695.0694138465979,
-          "win_rate": 72.8,
-          "profit_factor": 18.608474312397004,
-          "median_r": 7.746535253065224,
-          "tp_hits": 62,
-          "sl_hits": 34,
-          "trail_hits": 27
+          "n_trades": 158,
+          "avg_r": 4.660483069090567,
+          "total_r": 736.3563249163096,
+          "win_rate": 61.39240506329114,
+          "profit_factor": 11.423730459634577,
+          "median_r": 7.5965433157855164,
+          "tp_hits": 76,
+          "sl_hits": 61,
+          "trail_hits": 20
         },
-        "score": 1082.0555310772784
+        "score": 491.0483069090567
       },
       "LTCUSDT": {
         "params": {
@@ -242,17 +242,17 @@
         },
         "metrics": {
           "symbol": "LTCUSDT",
-          "n_trades": 144,
-          "avg_r": 5.992579746117837,
-          "total_r": 862.9314834409686,
-          "win_rate": 76.38888888888889,
-          "profit_factor": 22.967325957169383,
-          "median_r": 8.82176095113284,
-          "tp_hits": 84,
-          "sl_hits": 34,
-          "trail_hits": 26
+          "n_trades": 148,
+          "avg_r": 5.186203226968867,
+          "total_r": 767.5580775913922,
+          "win_rate": 67.56756756756756,
+          "profit_factor": 14.86705620715749,
+          "median_r": 7.716518394260719,
+          "tp_hits": 73,
+          "sl_hits": 48,
+          "trail_hits": 27
         },
-        "score": 1126.6579746117836
+        "score": 1046.9203226968866
       },
       "NEARUSDT": {
         "params": {
@@ -265,17 +265,17 @@
         },
         "metrics": {
           "symbol": "NEARUSDT",
-          "n_trades": 145,
-          "avg_r": 5.5154903767162855,
-          "total_r": 799.7461046238614,
-          "win_rate": 70.34482758620689,
-          "profit_factor": 17.009447520929577,
-          "median_r": 8.815254402927591,
-          "tp_hits": 80,
-          "sl_hits": 43,
+          "n_trades": 168,
+          "avg_r": 5.16269823403332,
+          "total_r": 867.3333033175977,
+          "win_rate": 66.07142857142857,
+          "profit_factor": 14.122826062344144,
+          "median_r": 8.812391440357729,
+          "tp_hits": 89,
+          "sl_hits": 57,
           "trail_hits": 21
         },
-        "score": 1076.5490376716284
+        "score": 1041.7698234033319
       },
       "SUIUSDT": {
         "params": {
@@ -288,17 +288,17 @@
         },
         "metrics": {
           "symbol": "SUIUSDT",
-          "n_trades": 142,
-          "avg_r": 5.228363759255124,
-          "total_r": 742.4276538142277,
-          "win_rate": 69.01408450704226,
-          "profit_factor": 15.581026553326742,
-          "median_r": 7.5061397988175464,
-          "tp_hits": 68,
+          "n_trades": 150,
+          "avg_r": 5.431170661712323,
+          "total_r": 814.6755992568485,
+          "win_rate": 70.66666666666667,
+          "profit_factor": 17.00001722675394,
+          "median_r": 8.812051813514937,
+          "tp_hits": 79,
           "sl_hits": 44,
-          "trail_hits": 30
+          "trail_hits": 27
         },
-        "score": 1052.0363759255124
+        "score": 1071.6170661712322
       },
       "TRXUSDT": {
         "params": {
@@ -311,20 +311,20 @@
         },
         "metrics": {
           "symbol": "TRXUSDT",
-          "n_trades": 171,
-          "avg_r": 5.249475823554126,
-          "total_r": 897.6603658277555,
-          "win_rate": 68.42105263157895,
-          "profit_factor": 15.354879817131568,
-          "median_r": 8.802456189184866,
-          "tp_hits": 89,
-          "sl_hits": 54,
-          "trail_hits": 28
+          "n_trades": 99,
+          "avg_r": 4.703659993109039,
+          "total_r": 465.6623393177948,
+          "win_rate": 62.62626262626263,
+          "profit_factor": 11.880128727809934,
+          "median_r": 7.638619642401876,
+          "tp_hits": 46,
+          "sl_hits": 37,
+          "trail_hits": 16
         },
-        "score": 1053.9475823554126
+        "score": 488.26599931090385
       }
     },
-    "mean_avg_r": 5.331082376199835
+    "mean_avg_r": 5.470362831628651
   },
   "ML_Trend_Pull": {
     "per_symbol": {
@@ -339,17 +339,17 @@
         },
         "metrics": {
           "symbol": "BTCUSDT",
-          "n_trades": 175,
-          "avg_r": 5.608790144698757,
-          "total_r": 981.5382753222824,
-          "win_rate": 72.57142857142857,
-          "profit_factor": 18.636417540738993,
-          "median_r": 8.804095344781006,
-          "tp_hits": 92,
-          "sl_hits": 48,
-          "trail_hits": 33
+          "n_trades": 173,
+          "avg_r": 5.43025268130156,
+          "total_r": 939.4337138651699,
+          "win_rate": 71.67630057803468,
+          "profit_factor": 17.523903133501275,
+          "median_r": 7.745176004541858,
+          "tp_hits": 86,
+          "sl_hits": 49,
+          "trail_hits": 37
         },
-        "score": 1092.3790144698755
+        "score": 1076.525268130156
       },
       "ETHUSDT": {
         "params": {
@@ -362,40 +362,40 @@
         },
         "metrics": {
           "symbol": "ETHUSDT",
-          "n_trades": 64,
-          "avg_r": 5.808599131102477,
-          "total_r": 371.75034439055855,
-          "win_rate": 75.0,
-          "profit_factor": 21.233899956743937,
-          "median_r": 8.8143615054665,
-          "tp_hits": 38,
+          "n_trades": 67,
+          "avg_r": 6.1766278143906295,
+          "total_r": 413.8340635641722,
+          "win_rate": 76.11940298507463,
+          "profit_factor": 23.73506383895986,
+          "median_r": 8.81985504574239,
+          "tp_hits": 44,
           "sl_hits": 16,
-          "trail_hits": 10
+          "trail_hits": 7
         },
-        "score": 1092.2599131102477
+        "score": 1127.862781439063
       },
       "SOLUSDT": {
         "params": {
           "sl_mult": 1.0,
           "tp_mult": 9.0,
-          "confidence": 0.75,
+          "confidence": 0.72,
           "trail_act": 5.0,
           "trail_buf": 0.4,
           "vol_regime_min": -1.0
         },
         "metrics": {
           "symbol": "SOLUSDT",
-          "n_trades": 52,
-          "avg_r": 5.963933751705469,
-          "total_r": 310.1245550886844,
+          "n_trades": 172,
+          "avg_r": 5.809793537538778,
+          "total_r": 999.2844884566698,
           "win_rate": 75.0,
-          "profit_factor": 21.450499397906995,
-          "median_r": 8.811617775155216,
-          "tp_hits": 31,
-          "sl_hits": 13,
-          "trail_hits": 8
+          "profit_factor": 20.962233037764243,
+          "median_r": 8.819460651422222,
+          "tp_hits": 98,
+          "sl_hits": 43,
+          "trail_hits": 30
         },
-        "score": 1105.593375170547
+        "score": 1110.9793537538778
       },
       "BNBUSDT": {
         "params": {
@@ -408,17 +408,17 @@
         },
         "metrics": {
           "symbol": "BNBUSDT",
-          "n_trades": 159,
-          "avg_r": 5.260409792827671,
-          "total_r": 836.4051570595998,
-          "win_rate": 69.18238993710692,
-          "profit_factor": 15.724466327526981,
-          "median_r": 7.459636928473381,
-          "tp_hits": 77,
-          "sl_hits": 49,
-          "trail_hits": 33
+          "n_trades": 179,
+          "avg_r": 5.820726556465432,
+          "total_r": 1041.9100536073122,
+          "win_rate": 74.30167597765363,
+          "profit_factor": 20.558589148779532,
+          "median_r": 8.8187205726923,
+          "tp_hits": 105,
+          "sl_hits": 46,
+          "trail_hits": 27
         },
-        "score": 1057.5409792827672
+        "score": 1110.5726556465431
       },
       "XRPUSDT": {
         "params": {
@@ -431,17 +431,17 @@
         },
         "metrics": {
           "symbol": "XRPUSDT",
-          "n_trades": 136,
-          "avg_r": 4.414489685697116,
-          "total_r": 600.3705972548078,
-          "win_rate": 61.029411764705884,
-          "profit_factor": 10.757088207120514,
-          "median_r": 6.6240868594214195,
-          "tp_hits": 55,
-          "sl_hits": 53,
-          "trail_hits": 27
+          "n_trades": 146,
+          "avg_r": 5.1405578029321095,
+          "total_r": 750.521439228088,
+          "win_rate": 67.8082191780822,
+          "profit_factor": 14.89083516197317,
+          "median_r": 8.315087529569608,
+          "tp_hits": 73,
+          "sl_hits": 47,
+          "trail_hits": 26
         },
-        "score": 468.5489685697116
+        "score": 1041.6557802932111
       },
       "ADAUSDT": {
         "params": {
@@ -455,16 +455,16 @@
         "metrics": {
           "symbol": "ADAUSDT",
           "n_trades": 157,
-          "avg_r": 4.667470732678833,
-          "total_r": 732.7929050305768,
-          "win_rate": 62.42038216560509,
-          "profit_factor": 11.809677285705865,
-          "median_r": 7.166695668252399,
-          "tp_hits": 72,
-          "sl_hits": 59,
-          "trail_hits": 25
+          "avg_r": 5.716961116926011,
+          "total_r": 897.5628953573837,
+          "win_rate": 73.88535031847134,
+          "profit_factor": 19.99091745967795,
+          "median_r": 8.81790908269998,
+          "tp_hits": 87,
+          "sl_hits": 41,
+          "trail_hits": 29
         },
-        "score": 494.2470732678833
+        "score": 1101.196111692601
       },
       "AVAXUSDT": {
         "params": {
@@ -477,17 +477,17 @@
         },
         "metrics": {
           "symbol": "AVAXUSDT",
-          "n_trades": 200,
-          "avg_r": 5.236508730584449,
-          "total_r": 1047.3017461168897,
-          "win_rate": 69.0,
-          "profit_factor": 15.530265090714668,
-          "median_r": 8.809723087299812,
-          "tp_hits": 102,
-          "sl_hits": 62,
-          "trail_hits": 33
+          "n_trades": 148,
+          "avg_r": 5.769613810207202,
+          "total_r": 853.902843910666,
+          "win_rate": 72.2972972972973,
+          "profit_factor": 18.963238222710476,
+          "median_r": 8.816533559207205,
+          "tp_hits": 86,
+          "sl_hits": 41,
+          "trail_hits": 21
         },
-        "score": 1055.1508730584449
+        "score": 1102.2613810207201
       },
       "DOGEUSDT": {
         "params": {
@@ -500,17 +500,17 @@
         },
         "metrics": {
           "symbol": "DOGEUSDT",
-          "n_trades": 148,
-          "avg_r": 5.1704712780589475,
-          "total_r": 765.2297491527243,
-          "win_rate": 68.24324324324324,
-          "profit_factor": 15.099754893383903,
-          "median_r": 8.802639435868807,
-          "tp_hits": 75,
-          "sl_hits": 47,
-          "trail_hits": 25
+          "n_trades": 134,
+          "avg_r": 5.429827888346895,
+          "total_r": 727.5969370384839,
+          "win_rate": 70.1492537313433,
+          "profit_factor": 16.719284641465865,
+          "median_r": 8.809669672837641,
+          "tp_hits": 71,
+          "sl_hits": 40,
+          "trail_hits": 21
         },
-        "score": 1044.3471278058946
+        "score": 1066.8827888346896
       },
       "DOTUSDT": {
         "params": {
@@ -523,17 +523,17 @@
         },
         "metrics": {
           "symbol": "DOTUSDT",
-          "n_trades": 162,
-          "avg_r": 5.18361973947807,
-          "total_r": 839.7463977954474,
-          "win_rate": 69.75308641975309,
-          "profit_factor": 15.89294629689721,
-          "median_r": 7.450940557351386,
-          "tp_hits": 78,
-          "sl_hits": 49,
-          "trail_hits": 33
+          "n_trades": 131,
+          "avg_r": 5.326959727874309,
+          "total_r": 697.8317243515345,
+          "win_rate": 70.22900763358778,
+          "profit_factor": 16.422184043814784,
+          "median_r": 8.801748308461491,
+          "tp_hits": 67,
+          "sl_hits": 39,
+          "trail_hits": 25
         },
-        "score": 1049.861973947807
+        "score": 1058.2959727874309
       },
       "LINKUSDT": {
         "params": {
@@ -546,40 +546,40 @@
         },
         "metrics": {
           "symbol": "LINKUSDT",
-          "n_trades": 133,
-          "avg_r": 5.140376054822443,
-          "total_r": 683.670015291385,
-          "win_rate": 68.42105263157895,
-          "profit_factor": 15.165646118737708,
-          "median_r": 7.452238055768825,
-          "tp_hits": 62,
-          "sl_hits": 41,
-          "trail_hits": 27
+          "n_trades": 162,
+          "avg_r": 4.667295057486601,
+          "total_r": 756.1017993128293,
+          "win_rate": 61.111111111111114,
+          "profit_factor": 11.36070389818933,
+          "median_r": 7.6827761850225285,
+          "tp_hits": 79,
+          "sl_hits": 63,
+          "trail_hits": 19
         },
-        "score": 1040.8376054822443
+        "score": 491.2295057486601
       },
       "LTCUSDT": {
         "params": {
           "sl_mult": 1.0,
           "tp_mult": 9.0,
-          "confidence": 0.72,
+          "confidence": 0.75,
           "trail_act": 5.0,
           "trail_buf": 0.4,
           "vol_regime_min": -1.0
         },
         "metrics": {
           "symbol": "LTCUSDT",
-          "n_trades": 149,
-          "avg_r": 5.806912947593014,
-          "total_r": 865.2300291913591,
-          "win_rate": 73.8255033557047,
-          "profit_factor": 20.255329238016234,
-          "median_r": 8.818655049854835,
-          "tp_hits": 85,
-          "sl_hits": 39,
-          "trail_hits": 25
+          "n_trades": 63,
+          "avg_r": 5.4166063814902845,
+          "total_r": 341.2462020338879,
+          "win_rate": 69.84126984126983,
+          "profit_factor": 16.528481652580115,
+          "median_r": 8.808424091659438,
+          "tp_hits": 34,
+          "sl_hits": 19,
+          "trail_hits": 10
         },
-        "score": 1108.0912947593015
+        "score": 1052.9606381490285
       },
       "NEARUSDT": {
         "params": {
@@ -592,40 +592,40 @@
         },
         "metrics": {
           "symbol": "NEARUSDT",
-          "n_trades": 148,
-          "avg_r": 5.384698106027357,
-          "total_r": 796.9353196920488,
-          "win_rate": 68.91891891891892,
-          "profit_factor": 15.928806510609895,
-          "median_r": 8.812336911378917,
-          "tp_hits": 80,
-          "sl_hits": 46,
-          "trail_hits": 21
+          "n_trades": 170,
+          "avg_r": 5.065584737989457,
+          "total_r": 861.1494054582078,
+          "win_rate": 65.88235294117646,
+          "profit_factor": 13.825851140208286,
+          "median_r": 8.810598137990224,
+          "tp_hits": 88,
+          "sl_hits": 58,
+          "trail_hits": 22
         },
-        "score": 1063.7698106027356
+        "score": 1032.5584737989457
       },
       "SUIUSDT": {
         "params": {
-          "sl_mult": 0.95,
-          "tp_mult": 8.55,
-          "confidence": 0.7,
-          "trail_act": 4.5,
+          "sl_mult": 1.0,
+          "tp_mult": 9.0,
+          "confidence": 0.72,
+          "trail_act": 5.0,
           "trail_buf": 0.4,
           "vol_regime_min": -1.0
         },
         "metrics": {
           "symbol": "SUIUSDT",
-          "n_trades": 150,
-          "avg_r": 5.263422144267093,
-          "total_r": 789.5133216400639,
-          "win_rate": 69.33333333333334,
-          "profit_factor": 15.675723154300243,
-          "median_r": 8.79651736402608,
-          "tp_hits": 77,
-          "sl_hits": 46,
-          "trail_hits": 27
+          "n_trades": 152,
+          "avg_r": 5.458449686008568,
+          "total_r": 829.6843522733024,
+          "win_rate": 71.05263157894737,
+          "profit_factor": 17.32159117097477,
+          "median_r": 8.812051813514937,
+          "tp_hits": 80,
+          "sl_hits": 44,
+          "trail_hits": 28
         },
-        "score": 1054.8422144267092
+        "score": 1074.8449686008566
       },
       "TRXUSDT": {
         "params": {
@@ -638,19 +638,19 @@
         },
         "metrics": {
           "symbol": "TRXUSDT",
-          "n_trades": 176,
-          "avg_r": 5.095495440933622,
-          "total_r": 896.8071976043175,
-          "win_rate": 67.04545454545455,
-          "profit_factor": 14.376286764890713,
-          "median_r": 8.7938113059406,
-          "tp_hits": 89,
-          "sl_hits": 58,
-          "trail_hits": 29
+          "n_trades": 97,
+          "avg_r": 4.818570150350123,
+          "total_r": 467.4013045839619,
+          "win_rate": 63.91752577319587,
+          "profit_factor": 12.55261804401037,
+          "median_r": 7.731981427133786,
+          "tp_hits": 46,
+          "sl_hits": 35,
+          "trail_hits": 16
         },
-        "score": 1039.049544093362
+        "score": 499.5570150350123
       }
     },
-    "mean_avg_r": 5.286085548605379
+    "mean_avg_r": 5.431987639236282
   }
 }
