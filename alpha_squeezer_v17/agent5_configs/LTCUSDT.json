@@ -1,0 +1,10 @@
+{
+    "window_size": 7,
+    "sl_mult": 0.7327573140558512,
+    "confidence": 0.5654516475595158,
+    "trail_act": 1.9274413766005654,
+    "ensemble_min_votes": 2,
+    "tp_mult": 2.965290849203219,
+    "target_month": "2026-06-01_to_2026-07-01",
+    "score": -99999.0
+}

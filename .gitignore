@@ -1,0 +1,24 @@
+# Ignore Excel exports and seeding cache
+Seeding/
+*.xlsx
+*.xls
+
+# Ignore screenshots/media
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.zip
+
+# Ignore python caches and model run summaries
+__pycache__/
+*.pyc
+catboost_info/
+
+# Ignore IDE specific files
+.ai/
+.idea/
+.vscode/
+.trash/
+*.log
+*.tmp

@@ -1,0 +1,302 @@
+[
+    {
+        "name": "Window 1",
+        "start": "2020-01-21",
+        "end": "2020-02-20",
+        "metrics": {
+            "net_profit": 4389.50452884293,
+            "max_dd": 97.70972068862648,
+            "max_daily_dd": 43.18006529509694,
+            "total_trades": 77,
+            "win_rate": 66.23376623376623,
+            "profit_factor": 8.580262939438434,
+            "passed": true,
+            "reason": "PASSED"
+        }
+    },
+    {
+        "name": "Window 2",
+        "start": "2020-05-14",
+        "end": "2020-06-13",
+        "metrics": {
+            "net_profit": 3745.693390889006,
+            "max_dd": 47.89687019057874,
+            "max_daily_dd": 47.89687019057874,
+            "total_trades": 41,
+            "win_rate": 73.17073170731707,
+            "profit_factor": 20.014176455384085,
+            "passed": true,
+            "reason": "PASSED"
+        }
+    },
+    {
+        "name": "Window 3",
+        "start": "2020-10-09",
+        "end": "2020-11-08",
+        "metrics": {
+            "net_profit": 7611.019245371839,
+            "max_dd": 81.58886313402763,
+            "max_daily_dd": 53.10444251408717,
+            "total_trades": 108,
+            "win_rate": 68.51851851851852,
+            "profit_factor": 12.686756150628995,
+            "passed": true,
+            "reason": "PASSED"
+        }
+    },
+    {
+        "name": "Window 4",
+        "start": "2021-02-26",
+        "end": "2021-03-28",
+        "metrics": {
+            "net_profit": 3528.1739494582453,
+            "max_dd": 106.9018697583997,
+            "max_daily_dd": 57.92046745451535,
+            "total_trades": 84,
+            "win_rate": 51.19047619047619,
+            "profit_factor": 5.316215156373011,
+            "passed": true,
+            "reason": "PASSED"
+        }
+    },
+    {
+        "name": "Window 5",
+        "start": "2021-07-18",
+        "end": "2021-08-17",
+        "metrics": {
+            "net_profit": 10817.040290709174,
+            "max_dd": 49.15542306297175,
+            "max_daily_dd": 25.00820618967373,
+            "total_trades": 137,
+            "win_rate": 78.83211678832117,
+            "profit_factor": 21.445907301619133,
+            "passed": true,
+            "reason": "PASSED"
+        }
+    },
+    {
+        "name": "Window 6",
+        "start": "2021-12-03",
+        "end": "2022-01-02",
+        "metrics": {
+            "net_profit": 6035.413619409919,
+            "max_dd": 89.03914477652506,
+            "max_daily_dd": 89.03914477652506,
+            "total_trades": 108,
+            "win_rate": 68.51851851851852,
+            "profit_factor": 9.765145094979582,
+            "passed": true,
+            "reason": "PASSED"
+        }
+    },
+    {
+        "name": "Window 7",
+        "start": "2022-03-12",
+        "end": "2022-04-11",
+        "metrics": {
+            "net_profit": 4577.519835308391,
+            "max_dd": 65.90611479895051,
+            "max_daily_dd": 46.02405110972995,
+            "total_trades": 94,
+            "win_rate": 61.702127659574465,
+            "profit_factor": 7.064333795719669,
+            "passed": true,
+            "reason": "PASSED"
+        }
+    },
+    {
+        "name": "Window 8",
+        "start": "2022-08-27",
+        "end": "2022-09-26",
+        "metrics": {
+            "net_profit": 11371.564645277025,
+            "max_dd": 91.8341443310328,
+            "max_daily_dd": 49.17244291058705,
+            "total_trades": 220,
+            "win_rate": 67.72727272727272,
+            "profit_factor": 8.123153661518609,
+            "passed": true,
+            "reason": "PASSED"
+        }
+    },
+    {
+        "name": "Window 9",
+        "start": "2023-01-05",
+        "end": "2023-02-04",
+        "metrics": {
+            "net_profit": 13130.506058955969,
+            "max_dd": 72.89263439210845,
+            "max_daily_dd": 68.372696557386,
+            "total_trades": 170,
+            "win_rate": 79.41176470588235,
+            "profit_factor": 18.945600257694643,
+            "passed": true,
+            "reason": "PASSED"
+        }
+    },
+    {
+        "name": "Window 10",
+        "start": "2023-06-16",
+        "end": "2023-07-16",
+        "metrics": {
+            "net_profit": 11560.26142216795,
+            "max_dd": 151.86017120037286,
+            "max_daily_dd": 83.09122869877865,
+            "total_trades": 264,
+            "win_rate": 62.5,
+            "profit_factor": 6.618713076872649,
+            "passed": true,
+            "reason": "PASSED"
+        }
+    },
+    {
+        "name": "Window 11",
+        "start": "2023-11-22",
+        "end": "2023-12-22",
+        "metrics": {
+            "net_profit": 14143.034341781258,
+            "max_dd": 107.37723190116958,
+            "max_daily_dd": 85.97207995014833,
+            "total_trades": 268,
+            "win_rate": 63.80597014925373,
+            "profit_factor": 7.620919791957045,
+            "passed": true,
+            "reason": "PASSED"
+        }
+    },
+    {
+        "name": "Window 12",
+        "start": "2024-04-08",
+        "end": "2024-05-08",
+        "metrics": {
+            "net_profit": 4327.576167516276,
+            "max_dd": 98.10220212825243,
+            "max_daily_dd": 47.93251170759231,
+            "total_trades": 75,
+            "win_rate": 62.66666666666667,
+            "profit_factor": 7.812030095961721,
+            "passed": true,
+            "reason": "PASSED"
+        }
+    },
+    {
+        "name": "Window 13",
+        "start": "2024-09-30",
+        "end": "2024-10-30",
+        "metrics": {
+            "net_profit": 4760.901619736736,
+            "max_dd": 169.41250438293173,
+            "max_daily_dd": 169.41250438293173,
+            "total_trades": 121,
+            "win_rate": 47.93388429752066,
+            "profit_factor": 4.946527019731256,
+            "passed": true,
+            "reason": "PASSED"
+        }
+    },
+    {
+        "name": "Window 14",
+        "start": "2025-01-11",
+        "end": "2025-02-10",
+        "metrics": {
+            "net_profit": 10105.630746434597,
+            "max_dd": 96.87775135245283,
+            "max_daily_dd": 48.88298256552298,
+            "total_trades": 169,
+            "win_rate": 63.31360946745562,
+            "profit_factor": 8.17912261872488,
+            "passed": true,
+            "reason": "PASSED"
+        }
+    },
+    {
+        "name": "Window 15",
+        "start": "2025-05-25",
+        "end": "2025-06-24",
+        "metrics": {
+            "net_profit": 7630.754768455143,
+            "max_dd": 49.88518710287644,
+            "max_daily_dd": 49.88518710287644,
+            "total_trades": 87,
+            "win_rate": 78.16091954022988,
+            "profit_factor": 18.049142373095286,
+            "passed": true,
+            "reason": "PASSED"
+        }
+    },
+    {
+        "name": "Window 16",
+        "start": "2025-08-07",
+        "end": "2025-09-06",
+        "metrics": {
+            "net_profit": 8610.587753719841,
+            "max_dd": 142.39913923952827,
+            "max_daily_dd": 70.83605282988083,
+            "total_trades": 172,
+            "win_rate": 58.139534883720934,
+            "profit_factor": 7.533740814596616,
+            "passed": true,
+            "reason": "PASSED"
+        }
+    },
+    {
+        "name": "Window 17",
+        "start": "2025-12-19",
+        "end": "2026-01-18",
+        "metrics": {
+            "net_profit": 4334.761578328373,
+            "max_dd": 92.32769075556462,
+            "max_daily_dd": 39.48588799418576,
+            "total_trades": 73,
+            "win_rate": 65.75342465753424,
+            "profit_factor": 10.789042209442469,
+            "passed": true,
+            "reason": "PASSED"
+        }
+    },
+    {
+        "name": "Window 18",
+        "start": "2026-02-13",
+        "end": "2026-03-15",
+        "metrics": {
+            "net_profit": 8364.18724406027,
+            "max_dd": 170.47191493615446,
+            "max_daily_dd": 128.71897378819358,
+            "total_trades": 213,
+            "win_rate": 49.76525821596244,
+            "profit_factor": 4.891961875833563,
+            "passed": true,
+            "reason": "PASSED"
+        }
+    },
+    {
+        "name": "Window 19",
+        "start": "2026-04-28",
+        "end": "2026-05-28",
+        "metrics": {
+            "net_profit": 8223.304563659833,
+            "max_dd": 267.0127649531123,
+            "max_daily_dd": 172.81968169724496,
+            "total_trades": 204,
+            "win_rate": 52.94117647058824,
+            "profit_factor": 5.5262904337878505,
+            "passed": true,
+            "reason": "PASSED"
+        }
+    },
+    {
+        "name": "Window 20",
+        "start": "2026-06-01",
+        "end": "2026-07-01",
+        "metrics": {
+            "net_profit": 10874.45757596413,
+            "max_dd": 120.70569936917036,
+            "max_daily_dd": 57.42838155068512,
+            "total_trades": 174,
+            "win_rate": 67.24137931034483,
+            "profit_factor": 11.275038127479165,
+            "passed": true,
+            "reason": "PASSED"
+        }
+    }
+]

@@ -1,0 +1,38 @@
+{
+    "__meta__": {
+        "last_entry_bar": {},
+        "daily_start_capital": 4903.37,
+        "last_rollover_day": "2026-07-15"
+    },
+    "trades": [
+        {
+            "trade_id": "ML_Liquidation_Runner_XAGUSDT_SHORT_1784133913065880100",
+            "symbol": "XAGUSDT",
+            "strategy": "ML_Liquidation_Runner",
+            "direction": -1,
+            "entry_price": 56.77,
+            "entry_time": "2026-07-15 22:15:13",
+            "entry_timestamp": 1784133913.065902,
+            "sl": 57.137667322943074,
+            "tp": 55.88759842493663,
+            "units": 66.68215658587691,
+            "live_pnl_pct": 0.0,
+            "live_pnl_usd": 0.0,
+            "atr": 0.29413385835445816,
+            "macro": 0,
+            "vol_regime": 0,
+            "sl_dist": 0.3676673229430705,
+            "trail_act": 0.9,
+            "trail_buf": 0.5,
+            "mt5_entry": 56.682,
+            "mt5_sl": 57.049,
+            "mt5_tp": 55.801,
+            "mt5_lot": 0.02,
+            "exit_price": 57.63,
+            "exit_time": "2026-07-15 23:07:51",
+            "exit_reason": "SL",
+            "pnl_pct": -1.5748846221595902,
+            "pnl_usd": -59.61798228148224
+        }
+    ]
+}
