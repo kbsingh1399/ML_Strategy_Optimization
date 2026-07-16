@@ -1,6 +1,0 @@
-2026/07/16-18:38:19.200 2770 Reusing MANIFEST C:\Users\SIGMA\Documents\Project - Coinglass Trading\Engine_1\chrome_profile\Default\Local Storage\leveldb/MANIFEST-000001
-2026/07/16-18:38:19.205 2770 Recovering log #36
-2026/07/16-18:38:19.207 2770 Reusing old log C:\Users\SIGMA\Documents\Project - Coinglass Trading\Engine_1\chrome_profile\Default\Local Storage\leveldb/000036.log 
-2026/07/16-18:39:19.219 56f4 Level-0 table #40: started
-2026/07/16-18:39:19.222 56f4 Level-0 table #40: 12771 bytes OK
-2026/07/16-18:39:19.223 56f4 Delete type=0 #36
