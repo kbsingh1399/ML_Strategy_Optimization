@@ -5,9 +5,72 @@ import os
 import time
 import datetime
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from pathlib import Path
+
+try:
+    from playwright.async_api import BrowserContext, Page
+except ImportError:
+    BrowserContext = Any
+    Page = Any
+
+if TYPE_CHECKING:
+    from Engine_1 import AssetSnapshot, SnapshotStore
+else:
+    AssetSnapshot = Any
+    SnapshotStore = Any
+
 log = logging.getLogger('Engine_1')
+
+URL = "https://www.coinglass.com/pro/futures/liquidation-heatmap"
+BASE_DIR = Path(__file__).parent
+base_dir = BASE_DIR
+
+SINGLE_FRAME_EXTRACTION_JS = """
+() => {
+    try {
+        let res = {};
+        let legends = document.querySelectorAll('.pane-legend-item, [class*="legend"]');
+        legends.forEach(el => {
+            let txt = el.innerText || "";
+            if (txt.includes("RSI")) res.rsi = txt.split(/\\s+/).pop();
+            if (txt.includes("CVD")) res.futures_cvd = txt.split(/\\s+/).pop();
+        });
+        let titleEl = document.querySelector('.pane-legend-title, [class*="title"]');
+        if (titleEl) res.symbol = titleEl.innerText;
+        let priceEl = document.querySelector('.pane-legend-value, [class*="lastValue"]');
+        if (priceEl) res.close = priceEl.innerText;
+        return { success: true, data: res };
+    } catch (e) {
+        return { success: false, error: e.toString() };
+    }
+}
+"""
+
+def parse_float(val: Any, default: float = 0.0) -> float:
+    if val is None:
+        return default
+    if isinstance(val, (int, float)):
+        return float(val)
+    try:
+        clean_str = str(val).replace(',', '').replace('$', '').replace('%', '').strip()
+        if clean_str.endswith('K') or clean_str.endswith('k'):
+            return float(clean_str[:-1]) * 1_000
+        if clean_str.endswith('M') or clean_str.endswith('m'):
+            return float(clean_str[:-1]) * 1_000_000
+        if clean_str.endswith('B') or clean_str.endswith('b'):
+            return float(clean_str[:-1]) * 1_000_000_000
+        return float(clean_str)
+    except (ValueError, TypeError):
+        return default
+
+def calculate_commodity_gap(symbol: str, price: float) -> float:
+    return 0.0
+
+def get_historical_timestamps(bars: int = 50) -> List[int]:
+    now = int(time.time())
+    return [now - (i * 900) for i in range(bars)][::-1]
+
 
 class CoinglassTab:
     def __init__(self, context: BrowserContext, symbols: List[str], store: SnapshotStore, tab_id: str):
