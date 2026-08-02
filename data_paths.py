@@ -17,6 +17,8 @@ def resolve_pq_dir() -> str:
     """Return the preferred parquet data directory as a string path."""
     if Path("/content").exists() and any(Path("/content").glob("Master_*_15m_Final_Summary.parquet")):
         return "/content"
+    if _GDRIVE_DIR.exists() and any(_GDRIVE_DIR.glob("Master_*_15m_Final_Summary.parquet")):
+        return str(_GDRIVE_DIR)
     if _LOCAL_DIR.exists() and any(_LOCAL_DIR.iterdir()):
         return str(_LOCAL_DIR)
     return str(_GDRIVE_DIR)

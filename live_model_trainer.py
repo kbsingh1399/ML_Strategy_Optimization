@@ -386,10 +386,10 @@ def prep_vwap(df: pd.DataFrame, btc_ref: pd.DataFrame = None):
 # -------------------------------------------------------------------------
 def load_asset(symbol: str) -> pd.DataFrame:
     search_dirs = [
+        r"G:\My Drive\_Trading_Data\15m\parquet",
         os.path.join(BASE_DIR, "backtesting_data"),
         os.path.join(BASE_DIR, "Seeding"),
-        BASE_DIR,
-        r"G:\My Drive\_Trading_Data\15m\parquet"
+        BASE_DIR
     ]
     sp, fp = None, None
     for d in search_dirs:
