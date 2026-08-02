@@ -30,3 +30,7 @@ lockfile
 # Generated local backtest data
 backtesting_data/
 .venv/
+engine_log.txt
+.agents/
+scratch/
+

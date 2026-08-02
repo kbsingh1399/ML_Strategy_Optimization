@@ -25,7 +25,13 @@ class MT5Broker:
         10031,  # CONNECTION
     }
 
-    def __init__(self, dry_run=True, account_size=5000.0, risk_pct=0.005, symbol_map=None, max_abs_basis_pct=0.005):
+    _SUCCESS_RETCODES = {
+        getattr(mt5, "TRADE_RETCODE_DONE", 10009),
+        getattr(mt5, "TRADE_RETCODE_PLACED", 10008),
+        getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", 10010),
+    }
+
+    def __init__(self, dry_run=True, account_size=5000.0, risk_pct=0.004, symbol_map=None, max_abs_basis_pct=0.005, magic=234000):
         self.dry_run = dry_run
         self.account_size = account_size
         self.risk_pct = risk_pct
@@ -37,7 +43,7 @@ class MT5Broker:
         self.max_abs_basis_pct = max_abs_basis_pct
         self._connect_failures = 0
         self._last_connect_attempt = 0.0
-        self.magic = 234000
+        self.magic = magic
 
     def connect(self):
         with self._lock:
@@ -62,6 +68,8 @@ class MT5Broker:
             return True
 
     def ensure_connected(self) -> bool:
+        if getattr(self, "dry_run", False):
+            return True
         with self._lock:
             if not self.connected:
                 return self.connect()
@@ -83,13 +91,20 @@ class MT5Broker:
             if request.get("action") == mt5.TRADE_ACTION_DEAL:
                 tick = mt5.symbol_info_tick(request["symbol"])
                 if tick is not None:
-                    if request["type"] in (mt5.ORDER_TYPE_BUY,):
-                        request["price"] = float(tick.ask)
-                    elif request["type"] in (mt5.ORDER_TYPE_SELL,):
-                        request["price"] = float(tick.bid)
+                    old_price = request.get("price", 0.0)
+                    new_price = float(tick.ask) if request["type"] in (mt5.ORDER_TYPE_BUY,) else float(tick.bid)
+                    if old_price > 0 and new_price != old_price:
+                        delta = new_price - old_price
+                        request["price"] = new_price
+                        if "sl" in request and request["sl"] > 0:
+                            request["sl"] = round(request["sl"] + delta, 8)
+                        if "tp" in request and request["tp"] > 0:
+                            request["tp"] = round(request["tp"] + delta, 8)
+                    else:
+                        request["price"] = new_price
             result = mt5.order_send(request)
             last_result = result
-            if result is not None and result.retcode == mt5.TRADE_RETCODE_DONE:
+            if result is not None and result.retcode in self._SUCCESS_RETCODES:
                 return result
             code = result.retcode if result else None
             if code not in self._RETRYABLE_RETCODES:
@@ -130,12 +145,14 @@ class MT5Broker:
     def _normalize_price(self, sym_info, price: float) -> float:
         return round(float(price), int(sym_info.digits))
 
-    def _normalize_lot(self, sym_info, raw_lot: float) -> float | None:
+    def _normalize_lot(self, sym_info, raw_lot: float, allow_min_lot: bool = False) -> float | None:
         min_lot = float(sym_info.volume_min)
         max_lot = float(sym_info.volume_max)
         step = float(sym_info.volume_step)
 
         if raw_lot < min_lot:
+            if allow_min_lot:
+                return min_lot
             return None  # Do not force min lot and over-risk
 
         lot = math.floor(raw_lot / step) * step
@@ -166,7 +183,21 @@ class MT5Broker:
                 return 0.0
             return info.ask if direction == 1 else info.bid
 
-    def execute_trade(self, binance_symbol, direction, bin_entry, bin_sl, bin_tp, strategy="Engine1"):
+    def execute_trade(self, binance_symbol, direction, bin_entry, bin_sl, bin_tp, strategy="Engine1", risk_usd=None):
+        if getattr(self, "dry_run", False):
+            print(f"[MT5 SIMULATION] Executing paper trade for {binance_symbol} direction={direction} at {bin_entry:.4f}")
+            return {
+                "mt5_symbol": binance_symbol.replace("USDT", "USD"),
+                "mt5_ticket": int(time.time()),
+                "mt5_order": int(time.time()),
+                "mt5_deal": int(time.time()),
+                "mt5_entry": bin_entry,
+                "mt5_sl": bin_sl,
+                "mt5_tp": bin_tp,
+                "lot": 0.1,
+                "is_pending": False
+            }
+
         if not self.ensure_connected():
             return None
 
@@ -214,19 +245,21 @@ class MT5Broker:
             tp_pct_dist = abs(bin_entry - bin_tp) / bin_entry
             basis_pct = abs(mt5_entry - bin_entry) / bin_entry
 
-            # Reject if broker quote is too far from signal market, UNLESS it is a Limit order
+            # Reject if broker quote is too far from signal market, UNLESS converted to a Limit order
             max_basis_allowed = min(
                 self.max_abs_basis_pct,
-                max(0.0015, 0.50 * sl_pct_dist),
+                max(0.0030, 0.50 * sl_pct_dist),
             )
 
             if not is_limit and basis_pct > max_basis_allowed:
+                # Convert to Limit Order at bin_entry instead of hard skipping
+                order_type = mt5.ORDER_TYPE_BUY_LIMIT if direction == 1 else mt5.ORDER_TYPE_SELL_LIMIT
+                is_limit = True
+                exec_price = self._normalize_price(sym_info, bin_entry)
                 print(
-                    f"[MT5 SKIP] {binance_symbol}->{mt5_sym}: basis too large. "
-                    f"Engine={bin_entry:.8f}, MT5={mt5_entry:.8f}, "
-                    f"basis={basis_pct*100:.3f}%, allowed={max_basis_allowed*100:.3f}%"
+                    f"[MT5 AUTO-LIMIT] {binance_symbol}->{mt5_sym}: basis {basis_pct*100:.3f}% > allowed {max_basis_allowed*100:.3f}%. "
+                    f"Converted to Limit Order at {exec_price:.8f}"
                 )
-                return None
 
             if direction == 1:
                 mt5_sl = exec_price * (1.0 - sl_pct_dist)
@@ -255,9 +288,13 @@ class MT5Broker:
                     )
                     return None
 
-            acc_info = mt5.account_info()
-            current_balance = acc_info.balance if acc_info is not None else self.account_size
-            risk_usd = current_balance * self.risk_pct
+            if risk_usd is None:
+                acc_info = mt5.account_info()
+                if acc_info is not None:
+                    effective_capital = min(float(acc_info.balance), float(acc_info.equity))
+                else:
+                    effective_capital = self.account_size
+                risk_usd = effective_capital * self.risk_pct
 
             loss_per_lot = self._loss_per_lot(mt5_sym, order_type, exec_price, mt5_sl, sym_info)
             if loss_per_lot <= 0:
@@ -265,7 +302,16 @@ class MT5Broker:
                 return None
 
             raw_lot = risk_usd / loss_per_lot
-            lot = self._normalize_lot(sym_info, raw_lot)
+            min_lot = float(sym_info.volume_min)
+
+            # Allow min_lot override if min_lot dollar risk is within $45 or <= 2.25x target risk
+            allow_min = False
+            if raw_lot < min_lot and loss_per_lot > 0:
+                min_lot_risk = min_lot * loss_per_lot
+                if min_lot_risk <= max(45.0, 2.25 * risk_usd):
+                    allow_min = True
+
+            lot = self._normalize_lot(sym_info, raw_lot, allow_min_lot=allow_min)
 
             if lot is None:
                 print(
@@ -275,11 +321,11 @@ class MT5Broker:
                 return None
 
             # Deviation is in broker points — clamp hard to cut slippage leaks.
-            # Cap at 0.03% of price or 5% of SL distance, whichever is smaller.
-            max_slip_pct = min(0.0003, max(0.00005, 0.05 * sl_pct_dist))
-            deviation_points = max(10, int((exec_price * max_slip_pct) / point)) if point > 0 else 10
-            # Hard ceiling: never allow > 40 points of slippage on crypto CFDs
-            deviation_points = min(deviation_points, 40)
+            # Cap at 0.20% of price or 20% of SL distance, whichever is smaller.
+            max_slip_pct = min(0.0020, max(0.00050, 0.20 * sl_pct_dist))
+            deviation_points = max(20, int((exec_price * max_slip_pct) / point)) if point > 0 else 20
+            # Hard ceiling: dynamically scale for crypto CFDs, cap at 1000 points
+            deviation_points = min(deviation_points, 1000)
 
             if self.dry_run:
                 print(f"[MT5 DRY RUN] {mt5_sym} | {'LONG' if direction == 1 else 'SHORT'}")
@@ -312,18 +358,22 @@ class MT5Broker:
                 "deviation": deviation_points,
                 "magic": self.magic,
                 "comment": f"{strategy}" + ("_Limit" if is_limit else ""),
-                "type_time": mt5.ORDER_TIME_GTC,
+                "type_time": mt5.ORDER_TIME_SPECIFIED if is_limit else mt5.ORDER_TIME_GTC,
             }
-            if not is_limit:
+            if is_limit:
+                # Expire limit orders after 4 hours if not filled
+                request["expiration"] = int(time.time() + 4 * 3600)
+            else:
                 request["type_filling"] = mt5.ORDER_FILLING_IOC
 
+            valid_check_codes = {0}.union(self._SUCCESS_RETCODES)
             check = mt5.order_check(request)
-            if check is not None and check.retcode not in (0, mt5.TRADE_RETCODE_DONE):
+            if check is not None and check.retcode not in valid_check_codes:
                 print(f"[MT5 SKIP] order_check failed: retcode={check.retcode}, comment={check.comment}")
                 return None
 
             result = self._order_send_with_retry(request, max_retries=3)
-            if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
+            if result is None or result.retcode not in self._SUCCESS_RETCODES:
                 code = result.retcode if result else "None"
                 comment = result.comment if result else "None"
                 print(f"[MT5] Order failed after retries. Code={code}, Comment={comment}")
@@ -434,10 +484,10 @@ class MT5Broker:
                 close_type = mt5.ORDER_TYPE_BUY
                 price = tick.ask
 
-            # Tight close deviation — exits must not bleed R on slippage
+            # Wide exit deviation — prioritize execution over slippage for SL/TP exits
             sym_info = mt5.symbol_info(pos.symbol)
             point = float(getattr(sym_info, "point", 0) or 0.01) if sym_info else 0.01
-            deviation_points = min(30, max(10, int(0.0002 * price / point) if point > 0 else 20))
+            deviation_points = max(50, int(0.005 * price / point) if point > 0 else 100)
 
             request = {
                 "action": mt5.TRADE_ACTION_DEAL,
@@ -524,6 +574,30 @@ class MT5Broker:
             if not positions:
                 return []
             return [p for p in positions if getattr(p, "magic", None) == self.magic]
+
+    def get_position_history_profit(self, position_ticket: int) -> tuple[float, float]:
+        """Returns (profit, price) of a closed position based on history deals. Fixes LEAK-17."""
+        if self.dry_run or not self.ensure_connected() or not position_ticket:
+            return 0.0, 0.0
+        with self._lock:
+            from datetime import datetime, timedelta
+            # Search last 30 days of deals for this position ticket
+            date_from = datetime.now() - timedelta(days=30)
+            date_to = datetime.now() + timedelta(days=1)
+            deals = mt5.history_deals_get(date_from, date_to, group="*")
+            if not deals:
+                return 0.0, 0.0
+            
+            pos_deals = [d for d in deals if getattr(d, "position_id", None) == position_ticket]
+            if not pos_deals:
+                return 0.0, 0.0
+                
+            total_profit = sum(getattr(d, "profit", 0.0) + getattr(d, "swap", 0.0) + getattr(d, "commission", 0.0) for d in pos_deals)
+            # Find the final deal (usually the out deal) to get exit price
+            out_deals = [d for d in pos_deals if getattr(d, "entry", mt5.DEAL_ENTRY_IN) in (mt5.DEAL_ENTRY_OUT, mt5.DEAL_ENTRY_OUT_BY)]
+            exit_price = getattr(out_deals[-1], "price", 0.0) if out_deals else 0.0
+            
+            return total_profit, exit_price
 
     def cancel_pending_order(self, order_ticket: int) -> bool:
         if self.dry_run:

@@ -9,19 +9,17 @@ import os
 from pathlib import Path
 
 _REPO_ROOT = Path(os.path.dirname(os.path.abspath(__file__)))
-_LOCAL_DIR = _REPO_ROOT / "backtesting_data"
+_LOCAL_DIR = _REPO_ROOT.parent / "Engine_1" / "backtesting_data"
 _GDRIVE_DIR = Path(r"G:\My Drive\_Trading_Data\15m\parquet")
 
 
 def resolve_pq_dir() -> str:
     """Return the preferred parquet data directory as a string path."""
-    if _LOCAL_DIR.is_dir():
-        if any(_LOCAL_DIR.glob("*.parquet")):
-            return str(_LOCAL_DIR)
+    if Path("/content").exists() and any(Path("/content").glob("Master_*_15m_Final_Summary.parquet")):
+        return "/content"
+    if _LOCAL_DIR.exists() and any(_LOCAL_DIR.iterdir()):
         return str(_LOCAL_DIR)
-    if _GDRIVE_DIR.is_dir():
-        return str(_GDRIVE_DIR)
-    return str(_LOCAL_DIR)
+    return str(_GDRIVE_DIR)
 
 
 PQ_DIR = resolve_pq_dir()
