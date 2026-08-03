@@ -52,15 +52,35 @@ SINGLE_FRAME_EXTRACTION_JS = """
         }
         
         // Extract indicators from legend items
-        let legends = document.querySelectorAll('.pane-legend-item, [class*="legend"]');
+        let legends = document.querySelectorAll('.pane-legend-item, [class*="legendItem"], [class*="legend"]');
         legends.forEach(el => {
             let txt = el.innerText || '';
-            let numMatch = txt.match(/[\\d.]+\\s*$/);
-            let num = numMatch ? numMatch[0].trim() : null;
             let upper = txt.toUpperCase();
+            
+            let valSubEls = el.querySelectorAll('.pane-legend-value, [class*="legendValue"], [class*="value"]');
+            let numStrs = Array.from(valSubEls).map(v => v.innerText.trim()).filter(v => v && v !== 'N/A');
+            
+            let num = numStrs.length > 0 ? numStrs[numStrs.length - 1] : null;
+            if (!num) {
+                let match = txt.match(/[\\d.,KMBkmb%+-]+/g);
+                if (match) num = match[match.length - 1].trim();
+            }
+            
             if (upper.includes('RSI') && num) res.rsi = num;
             if (upper.includes('CVD') && upper.includes('SPOT') && num) res.spot_cvd = num;
             if (upper.includes('CVD') && !upper.includes('SPOT') && num) res.futures_cvd = num;
+            if ((upper.includes('OI') || upper.includes('OPEN INTEREST')) && num) res.open_interest = num;
+            if ((upper.includes('FUNDING') || upper.includes('FUND')) && num) res.funding_rate = num;
+            if ((upper.includes('LONG/SHORT') || upper.includes('LSR') || upper.includes('RATIO')) && num) res.ls_ratio = num;
+            
+            if (upper.includes('LIQUIDATION') || upper.includes('LIQ')) {
+                if (numStrs.length >= 2) {
+                    res.liquidations_long = numStrs[0];
+                    res.liquidations_short = numStrs[1];
+                } else if (numStrs.length === 1) {
+                    res.liquidations_long = numStrs[0];
+                }
+            }
         });
         
         // Fallback for close from price line
