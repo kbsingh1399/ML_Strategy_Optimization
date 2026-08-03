@@ -4,6 +4,10 @@ import threading
 import time
 
 
+import logging
+
+log = logging.getLogger("Engine_1")
+
 class MT5Broker:
     """
     Low-level MT5 execution wrapper with:
@@ -62,12 +66,12 @@ class MT5Broker:
                 pass
             if not mt5.initialize():
                 self._connect_failures += 1
-                print(f"[MT5] initialize() failed (attempt {self._connect_failures}), error={mt5.last_error()}")
+                log.info(f"[MT5] initialize() failed (attempt {self._connect_failures}), error={mt5.last_error()}")
                 self.connected = False
                 return False
             self.connected = True
             self._connect_failures = 0
-            print("[MT5] Connected to MetaTrader 5 successfully!")
+            log.info("[MT5] Connected to MetaTrader 5 successfully!")
             return True
 
     def ensure_connected(self) -> bool:
