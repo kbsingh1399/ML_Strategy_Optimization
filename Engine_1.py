@@ -872,10 +872,10 @@ def render_table(snap: Dict[str, AssetSnapshot], trade_tracker=None):
         pnl_pct = total_pnl / trade_tracker.initial_capital * 100.0
 
         stats_text = (
-            f"Capital: [bold]${stats['current_capital']:,.2f}[/bold] | "
-            f"PnL: [bold {pnl_clr}]{pnl_sign}${total_pnl:.2f} ({pnl_pct:+.2f}%)[/bold] | "
-            f"Trades: [bold]{stats['total']}[/bold] | "
-            f"WR: [bold]{stats['winrate']:.1f}%[/bold]"
+            f"Capital: [bold]${stats['current_capital']:,.2f}[/] | "
+            f"PnL: [bold {pnl_clr}]{pnl_sign}${total_pnl:.2f} ({pnl_pct:+.2f}%)[/] | "
+            f"Trades: [bold]{stats['total']}[/] | "
+            f"WR: [bold]{stats['winrate']:.1f}%[/]"
         )
 
         active_lines = []
