@@ -4,9 +4,13 @@ import json
 import os
 import time
 import datetime
+import collections
 import logging
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from pathlib import Path
+from openpyxl import Workbook
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
 try:
     from playwright.async_api import BrowserContext, Page
@@ -22,7 +26,7 @@ else:
 
 log = logging.getLogger('Engine_1')
 
-URL = "https://www.coinglass.com/pro/futures/liquidation-heatmap"
+URL = "https://www.coinglass.com/tv/layout/s9"
 BASE_DIR = Path(__file__).parent
 base_dir = BASE_DIR
 
@@ -64,12 +68,53 @@ def parse_float(val: Any, default: float = 0.0) -> float:
     except (ValueError, TypeError):
         return default
 
-def calculate_commodity_gap(symbol: str, price: float) -> float:
-    return 0.0
+def get_historical_timestamps(symbol: str, start_time_ts: int, steps: int) -> List[int]:
+    is_crypto = symbol not in ["XAUUSDT", "XAGUSDT", "CLUSDT", "NATGASUSDT"]
+    if is_crypto:
+        return [int(start_time_ts - i * 900) for i in range(steps)]
 
-def get_historical_timestamps(bars: int = 50) -> List[int]:
-    now = int(time.time())
-    return [now - (i * 900) for i in range(bars)][::-1]
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    ny_tz = ZoneInfo("America/New_York")
+
+    def is_active(dt):
+        day = dt.weekday()
+        hour = dt.hour
+        if day == 4:  # Friday
+            if hour >= 17: return False
+        elif day == 5:  # Saturday
+            return False
+        elif day == 6:  # Sunday
+            if hour < 18: return False
+        if day in (0, 1, 2, 3):  # Mon-Thu
+            if hour == 17: return False
+        return True
+
+    dt = datetime.fromtimestamp(start_time_ts, tz=ny_tz)
+    dt = dt.replace(minute=(dt.minute // 15) * 15, second=0, microsecond=0)
+
+    while not is_active(dt):
+        dt -= timedelta(minutes=15)
+
+    timestamps = []
+    for _ in range(steps):
+        timestamps.append(int(dt.timestamp()))
+        dt -= timedelta(minutes=15)
+        while not is_active(dt):
+            dt -= timedelta(minutes=15)
+
+    return timestamps
+
+def calculate_commodity_gap(symbol: str, latest_time: int, current_time: int) -> int:
+    is_crypto = symbol not in ["XAUUSDT", "XAGUSDT", "CLUSDT", "NATGASUSDT"]
+    if is_crypto:
+        return max(0, int((current_time - latest_time) / 900))
+    timestamps = get_historical_timestamps(symbol, current_time, 2000)
+    for idx, ts in enumerate(timestamps):
+        if ts <= latest_time:
+            return idx
+    return 1000
 
 
 class CoinglassTab:
@@ -460,14 +505,13 @@ class CoinglassTab:
             
             iframe = container.locator("iframe").first
             try:
-                await iframe.wait_for(state="attached", timeout=15000)
-            except Exception:
-                pass
-            iframe_handle = await iframe.element_handle(timeout=10000)
-            if not iframe_handle:
-                log.info(f"[{self.tab_id}] [ERROR] No iframe handle for seeding {symbol}")
+                await iframe.wait_for(state="attached", timeout=10000)
+                iframe_handle = await iframe.element_handle(timeout=5000)
+                frame = await iframe_handle.content_frame() if iframe_handle else None
+            except Exception as iframe_exc:
+                log.info(f"[{self.tab_id}] [WARN] Could not acquire iframe for {symbol}: {iframe_exc}")
                 return
-            frame = await iframe_handle.content_frame()
+
             if not frame:
                 log.info(f"[{self.tab_id}] [ERROR] Content frame missing for seeding {symbol}")
                 return

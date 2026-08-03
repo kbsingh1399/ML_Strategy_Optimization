@@ -995,7 +995,7 @@ async def watchdog(components: List[Any], stop: asyncio.Event) -> None:
 
 
 
-async def main_async(skip_seed: bool = False) -> None:
+async def main_async(skip_seed: bool = False, skip_train: bool = False) -> None:
     """Main async entry point for production mode with 5-step startup sequence."""
     log.info("=" * 60)
     log.info(f"ENGINE_1 STARTING — 6-Strategy ML Trading System")
@@ -1004,24 +1004,27 @@ async def main_async(skip_seed: bool = False) -> None:
     log.info(f"Symbols: {len(ALL_SYMBOLS)} total ({len(TAB1_SYMBOLS)} Tab1 + {len(TAB2_SYMBOLS)} Tab2)")
     log.info("=" * 60)
 
-    # 1. Clear Old Models
-    models_dir = BASE_DIR / "models"
-    if models_dir.exists():
-        shutil.rmtree(models_dir)
-    models_dir.mkdir(parents=True, exist_ok=True)
-    log.info("[Startup] Cleared old models directory.")
+    if not skip_train:
+        # 1. Clear Old Models
+        models_dir = BASE_DIR / "models"
+        if models_dir.exists():
+            shutil.rmtree(models_dir)
+        models_dir.mkdir(parents=True, exist_ok=True)
+        log.info("[Startup] Cleared old models directory.")
 
-    # 2. Retrain Models on Latest GDrive Data
-    log.info("[Startup] Step 2/5 — Retraining models on latest GDrive data...")
-    try:
-        from live_model_trainer import train_all_strategies
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, train_all_strategies)
-        log.info("[Startup] Model retraining complete.")
-    except ImportError:
-        log.warning("[Startup] live_model_trainer.py not found — skipping model training.")
-    except Exception as e:
-        log.warning(f"[Startup] Model training failed ({e}), continuing with existing models if any.")
+        # 2. Retrain Models on Latest GDrive Data
+        log.info("[Startup] Step 2/5 — Retraining models on latest GDrive data...")
+        try:
+            from live_model_trainer import train_all_strategies
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, train_all_strategies)
+            log.info("[Startup] Model retraining complete.")
+        except ImportError:
+            log.warning("[Startup] live_model_trainer.py not found — skipping model training.")
+        except Exception as e:
+            log.warning(f"[Startup] Model training failed ({e}), continuing with existing models if any.")
+    else:
+        log.info("[Startup] Skipping model clearing and retraining (--skip-train).")
 
     # 3. Initialize Core Components
     trade_tracker = Engine1TradeTracker()
@@ -1046,12 +1049,29 @@ async def main_async(skip_seed: bool = False) -> None:
             headless=False,
             viewport={"width": 1920, "height": 1080},
             args=[
+                "--disable-blink-features=AutomationControlled",
                 "--disable-features=CalculateNativeWinOcclusion",
                 "--disable-background-timer-throttling",
                 "--start-maximized",
-                "--remote-debugging-port=9222"
-            ]
+                "--remote-debugging-port=9222",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-infobars",
+                "--window-size=1920,1080",
+                "--disable-dev-shm-usage",
+                "--disable-web-security",
+                "--disable-features=IsolateOrigins,site-per-process",
+            ],
+            ignore_default_args=["--enable-automation"],
         )
+        
+        # Apply stealth patches to every page
+        ctx.on("page", lambda page: page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+            window.chrome = {runtime: {}};
+        """))
         
         # Performing Session Login first
         log.info("[Startup] Navigating to Coinglass Login...")
@@ -1487,6 +1507,7 @@ if __name__ == "__main__":
     parser.add_argument("--test", action="store_true", help="Run smoke test")
     parser.add_argument("--live", action="store_true", help="Start live trading")
     parser.add_argument("--skip-seed", action="store_true", help="Skip historical seeding")
+    parser.add_argument("--skip-train", action="store_true", help="Skip model clearing and retraining")
     parser.add_argument("--backtest", type=str, metavar="SYMBOL",
                         help="Run backtest on one symbol")
     args = parser.parse_args()
@@ -1516,6 +1537,6 @@ if __name__ == "__main__":
             print(f"\n  ⭐ ENSEMBLE = trades requiring 3+/6 strategy agreement")
             print(f"  Note: Live engine adds risk gov, circuit breakers, MT5 execution")
     elif args.live:
-        asyncio.run(main_async(skip_seed=args.skip_seed))
+        asyncio.run(main_async(skip_seed=args.skip_seed, skip_train=args.skip_train))
     else:
         smoke_test()
