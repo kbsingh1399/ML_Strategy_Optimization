@@ -174,6 +174,7 @@ class CoinglassTab:
         self.running = True
         self._response_tasks: set[asyncio.Task] = set()
         self.poll_failures = 0
+        self.indicators_injected = False
 
     async def start(self) -> None:
         self.page = await self.context.new_page()
@@ -232,6 +233,9 @@ class CoinglassTab:
         await asyncio.sleep(15)  # Wait 15 seconds for S9 chart renders
 
     async def reconnect(self, focus_lock: asyncio.Lock) -> None:
+        if self.indicators_injected:
+            log.info(f"[{self.tab_id}] Indicators are already injected — bypassing tab reconnect to prevent page reload.")
+            return
         log.info(f"[{self.tab_id}] [RECOVERY] Attempting to reconnect/restart the tab...")
         self.is_seeding = True
         try:
@@ -396,6 +400,7 @@ class CoinglassTab:
         except Exception as e:
             log.info(f"[{self.tab_id}] [WARN] Screenshot failed: {e}")
         log.info(f"[{self.tab_id}] Setup & Indicator injection complete.")
+        self.indicators_injected = True
 
     async def run(self) -> None:
         """Alias for poll_loop to maintain compatibility with engine tasks"""
@@ -478,12 +483,15 @@ class CoinglassTab:
                 self.poll_failures += 1
             
             if self.poll_failures > 60:
-                log.debug(f"[{self.tab_id}] [WATCHDOG] Max failures exceeded ({self.poll_failures}). Auto-healing page...")
-                try:
-                    await self.page.reload(wait_until="domcontentloaded", timeout=30000)
-                    self.poll_failures = 0
-                except Exception as ex:
-                    log.debug(f"[{self.tab_id}] [WATCHDOG] Failed to reload page: {ex}")
+                if not getattr(self, 'indicators_injected', False):
+                    log.debug(f"[{self.tab_id}] [WATCHDOG] Max failures exceeded ({self.poll_failures}). Auto-healing page...")
+                    try:
+                        await self.page.reload(wait_until="domcontentloaded", timeout=30000)
+                        self.poll_failures = 0
+                    except Exception as ex:
+                        log.debug(f"[{self.tab_id}] [WATCHDOG] Failed to reload page: {ex}")
+                        self.poll_failures = 0
+                else:
                     self.poll_failures = 0
 
             await asyncio.sleep(0.5)
@@ -1159,7 +1167,8 @@ async def watchdog(components: List[Any], focus_lock: asyncio.Lock, stop: asynci
             now = time.time_ns()
             for c in components:
                 if hasattr(c, 'last_heartbeat_ns') and now - c.last_heartbeat_ns > 90_000_000_000:
-                    if getattr(c, 'skip_watchdog', False):
+                    if getattr(c, 'indicators_injected', False) or getattr(c, 'skip_watchdog', False):
+                        c.last_heartbeat_ns = time.time_ns()
                         continue
                     log.info(f"[Watchdog] [WARN] Subsystem '{c.__class__.__name__}' ({getattr(c, 'tab_id', 'Unknown')}) hung. Heartbeat silent >90s.")
                     if isinstance(c, CoinglassTab):
