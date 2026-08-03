@@ -733,7 +733,7 @@ class CoinglassTab:
                 if d is None:
                     stalls += 1
                     if stalls > 4:
-                        log.info(f"[{self.tab_id}] [WARN] Seeding stalled for {symbol} at step {step}. Ending early.")
+                        log.debug(f"[{self.tab_id}] [WARN] Seeding stalled for {symbol} at step {step}. Ending early.")
                         break
                     # Recover visual focus delegation
                     await canvas.focus()
@@ -816,7 +816,7 @@ class CoinglassTab:
                 last = list(candles)[-1]
                 missing = [k for k, v in last.items() if v == 0.0 and k not in ("liq_long", "liq_short")]
                 if missing:
-                    log.info(f"[{self.tab_id}] [WARN] {symbol}: zero fields = {missing}")
+                    log.debug(f"[{self.tab_id}] [WARN] {symbol}: zero fields = {missing}")
                 else:
                     log.info(f"[{self.tab_id}] [OK]   {symbol}: all fields populated (close={last['close']}, vol={last['volume']}, funding={last['funding']})")
                     
@@ -838,7 +838,7 @@ def fetch_binance_funding_rates(symbol: str) -> List[Dict[str, Any]]:
         with urllib.request.urlopen(req, timeout=5) as response:
             return json.loads(response.read().decode())
     except Exception as e:
-        log.info(f"[Binance API] Failed to fetch funding rate for {symbol}: {e}")
+        log.debug(f"[Binance API] Failed to fetch funding rate for {symbol}: {e}")
         return []
 
 def fetch_binance_open_interest(symbol: str) -> List[Dict[str, Any]]:
@@ -850,7 +850,7 @@ def fetch_binance_open_interest(symbol: str) -> List[Dict[str, Any]]:
         with urllib.request.urlopen(req, timeout=5) as response:
             return json.loads(response.read().decode())
     except Exception as e:
-        log.info(f"[Binance API] Failed to fetch open interest for {symbol}: {e}")
+        log.debug(f"[Binance API] Failed to fetch open interest for {symbol}: {e}")
         return []
 
 def fetch_binance_ls_ratio(symbol: str) -> List[Dict[str, Any]]:
@@ -862,7 +862,7 @@ def fetch_binance_ls_ratio(symbol: str) -> List[Dict[str, Any]]:
         with urllib.request.urlopen(req, timeout=5) as response:
             return json.loads(response.read().decode())
     except Exception as e:
-        log.info(f"[Binance API] Failed to fetch long/short ratio for {symbol}: {e}")
+        log.debug(f"[Binance API] Failed to fetch long/short ratio for {symbol}: {e}")
         return []
 
 def _dump_xlsx(symbol: str, rows: List[Dict[str, Any]]) -> None:
