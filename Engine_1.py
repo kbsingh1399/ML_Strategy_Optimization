@@ -41,7 +41,7 @@ except ImportError:
     async_playwright = None
 
 try:
-    from coinglass_scraper import CoinglassTab
+    from coinglass_scraper import CoinglassTab, combine_seeding_files
 except ImportError:
     CoinglassTab = None
 
@@ -1137,8 +1137,9 @@ async def main_async(skip_seed: bool = False) -> None:
                     except Exception as e:
                         log.warning(f"[Setup] Seeding failed for {sym} (attempt {attempt+1}/3): {e}")
                         if attempt == 2:
-                            raise
-                        await asyncio.sleep(3.0)
+                            log.warning(f"[Setup] Seeding skipped for {sym} — engine will proceed with parquet historical cache.")
+                        else:
+                            await asyncio.sleep(2.0)
             
             # Seed sequentially per tab
             for sym in TAB1_SYMBOLS:
