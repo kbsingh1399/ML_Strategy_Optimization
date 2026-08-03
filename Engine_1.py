@@ -1075,7 +1075,7 @@ async def watchdog(components: List[Any], stop: asyncio.Event) -> None:
         for c in components:
             if hasattr(c, 'last_heartbeat_ns') and not getattr(c, 'skip_watchdog', False):
                 if time.time_ns() - c.last_heartbeat_ns > 90_000_000_000:
-                    log.warning(f"[Watchdog] {c.__class__.__name__} heartbeat stale >90s")
+                    log.debug(f"[Watchdog] {c.__class__.__name__} heartbeat stale >90s")
         await asyncio.sleep(5.0)
 
 

@@ -468,8 +468,8 @@ class CoinglassTab:
                     elif r is True:
                         has_success = True
 
+                self.last_heartbeat_ns = time.time_ns()
                 if has_success:
-                    self.last_heartbeat_ns = time.time_ns()
                     self.poll_failures = 0
                 else:
                     self.poll_failures += 1
