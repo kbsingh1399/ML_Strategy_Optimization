@@ -269,6 +269,35 @@ STRATEGIES: Dict[str, dict] = {
     "S6_OI_Momentum":    {"fn": signal_s6, "weight": 1.0, "wr": 79.7},
 }
 
+ALL_STRATEGY_KEYS = list(STRATEGIES.keys())
+
+def _fuzzy_match(s: str) -> Optional[str]:
+    """Resolve short name like S1, S2, or S1_Liquidation to full key."""
+    s_upper = s.upper().strip()
+    for key in ALL_STRATEGY_KEYS:
+        key_upper = key.upper()
+        if s_upper == key_upper or key_upper.startswith(s_upper + "_") or key_upper.split("_")[0] == s_upper:
+            return key
+    return None
+
+def resolve_active_strategies(active: Optional[List[str]] = None, skip: Optional[List[str]] = None) -> List[str]:
+    """Convert active/skip list into final active strategy key list."""
+    if active:
+        resolved = []
+        for a in active:
+            m = _fuzzy_match(a)
+            if m and m not in resolved:
+                resolved.append(m)
+        return resolved if resolved else ALL_STRATEGY_KEYS
+    elif skip:
+        skip_keys = set()
+        for sk in skip:
+            m = _fuzzy_match(sk)
+            if m:
+                skip_keys.add(m)
+        return [k for k in ALL_STRATEGY_KEYS if k not in skip_keys]
+    return ALL_STRATEGY_KEYS
+
 
 # ─── FEATURE MAPPING: AssetSnapshot → DataFrame Columns ────────────────────
 
@@ -329,33 +358,36 @@ def snapshot_to_candle_row(snapshot) -> dict:
 
 class EnsembleAggregator:
     """
-    Weighted voting ensemble for 6 strategy signals.
+    Weighted voting ensemble for strategy signals.
     Thread-safe for concurrent strategy evaluation.
     """
-    def __init__(self, cfg: StrategyConfig = None):
+    def __init__(self, cfg: StrategyConfig = None, active_strategies: Optional[List[str]] = None):
         self.cfg = cfg or StrategyConfig()
         self.lock = threading.RLock()
         self.last_trade_time: Dict[str, datetime] = {}
+        self.active_strategies = active_strategies if active_strategies is not None else ALL_STRATEGY_KEYS
+        self._eff_min_agree = min(self.cfg.min_agreeing, len(self.active_strategies))
 
     def aggregate(self, strategy_signals: Dict[str, int]) -> Tuple[int, float, int]:
         """
-        Aggregate signals from all 6 strategies into a final direction.
+        Aggregate signals from active strategies into a final direction.
         Returns: (direction, confidence, agreeing_strategies_count)
           direction: +1 long, -1 short, 0 flat
           confidence: 0.0 - 1.0
         """
         with self.lock:
-            longs = sum(1 for s in strategy_signals.values() if s == 1)
-            shorts = sum(1 for s in strategy_signals.values() if s == -1)
-            total = len(strategy_signals)
+            filtered_signals = {k: v for k, v in strategy_signals.items() if k in self.active_strategies}
+            longs = sum(1 for s in filtered_signals.values() if s == 1)
+            shorts = sum(1 for s in filtered_signals.values() if s == -1)
+            total = len(filtered_signals)
 
-            if total < 3:
+            if total < 1:
                 return 0, 0.0, 0
 
             # Weighted voting using historical win rates
             weighted_long = 0.0
             weighted_short = 0.0
-            for name, sig in strategy_signals.items():
+            for name, sig in filtered_signals.items():
                 if name not in STRATEGIES:
                     continue
                 wr = STRATEGIES[name]["wr"] / 100.0
@@ -365,7 +397,7 @@ class EnsembleAggregator:
                     weighted_short += wr
 
             total_weight = sum(
-                STRATEGIES[n]["wr"] for n in strategy_signals if n in STRATEGIES
+                STRATEGIES[n]["wr"] for n in filtered_signals if n in STRATEGIES
             ) / 100.0
 
             if total_weight == 0:
@@ -390,7 +422,7 @@ class EnsembleAggregator:
         """Check if entry conditions are met."""
         return (
             confidence >= self.cfg.min_confidence and
-            agreeing >= self.cfg.min_agreeing and
+            agreeing >= self._eff_min_agree and
             direction != 0
         )
 
@@ -426,15 +458,16 @@ class EnsembleStrategyPredictor:
         predictor.on_tick_update(symbol, snap, trade_tracker)
         # Returns updated snap with strategy_armed and ml_signals populated
     """
-    def __init__(self, symbols: List[str], cfg: StrategyConfig = None):
+    def __init__(self, symbols: List[str], cfg: StrategyConfig = None, active_strategies: Optional[List[str]] = None):
         self.symbols = symbols
         self.cfg = cfg or StrategyConfig()
+        self.active_strategies = active_strategies if active_strategies is not None else ALL_STRATEGY_KEYS
         self.candles_history: Dict[str, deque] = {}
         self.current_candle: Dict[str, dict] = {}
         self._cached_signal: Dict[str, dict] = {}
         self._last_predict_bar: Dict[str, int] = {}
         self._lock = threading.RLock()
-        self.ensemble = EnsembleAggregator(self.cfg)
+        self.ensemble = EnsembleAggregator(self.cfg, active_strategies=self.active_strategies)
         self.latest_atr: Dict[str, float] = {}
         self.recent_capitals: List[float] = []
         self._last_tick_print: Dict[str, float] = {}
@@ -445,7 +478,7 @@ class EnsembleStrategyPredictor:
         self._engine_start_time: float = time.time()
 
         log.info(f"EnsembleStrategyPredictor initialized for {len(symbols)} symbols")
-        log.info(f"Strategies: {list(STRATEGIES.keys())}")
+        log.info(f"Active Strategies ({len(self.active_strategies)}/{len(ALL_STRATEGY_KEYS)}): {self.active_strategies}")
         log.info(f"Config: min_confidence={self.cfg.min_confidence}, "
                  f"min_agreeing={self.cfg.min_agreeing}")
         log.info(f"Warm-up gate active — requires {self.cfg.bar_warmup} bars + 30s live ticks")

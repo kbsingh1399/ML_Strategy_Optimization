@@ -1025,12 +1025,12 @@ async def watchdog(components: List[Any], stop: asyncio.Event) -> None:
 
 
 
-async def main_async(skip_seed: bool = False, skip_train: bool = False) -> None:
-    """Main async entry point for production mode with 5-step startup sequence."""
+async def main_async(skip_seed: bool = False, skip_train: bool = False,
+                     skip_browser: bool = False, active_strategies=None) -> None:
+    """Main async entry point for production mode with modular startup options."""
     log.info("=" * 60)
     log.info(f"ENGINE_1 STARTING — 6-Strategy ML Trading System")
     log.info(f"Mode: {EXECUTION_MODE} | MT5 Live: {MT5_LIVE}")
-    log.info(f"Strategies: {list(STRATEGIES.keys())}")
     log.info(f"Symbols: {len(ALL_SYMBOLS)} total ({len(TAB1_SYMBOLS)} Tab1 + {len(TAB2_SYMBOLS)} Tab2)")
     log.info("=" * 60)
 
@@ -1038,13 +1038,56 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False) -> None:
     trade_tracker = Engine1TradeTracker()
     trade_tracker.update_day()
 
-    predictor = EnsembleStrategyPredictor(ALL_SYMBOLS)
+    predictor = EnsembleStrategyPredictor(ALL_SYMBOLS, active_strategies=active_strategies)
     predictor.recent_capitals = [trade_tracker.current_capital]
     trade_tracker.on_close_callbacks.append(
         lambda strategy, capital: predictor.record_closed_capital(capital)
     )
 
     store = SnapshotStore(ALL_SYMBOLS, predictor=predictor, trade_tracker=trade_tracker)
+
+    if skip_browser:
+        log.info("[Startup] --skip-browser active. Skipping Playwright/Coinglass tabs.")
+        log.info("[Startup] Starting in Binance-only live feed mode.")
+
+        # Seed predictor from available cache if skip_seed is False
+        if not skip_seed:
+            await seed_all_symbols(predictor, ALL_SYMBOLS, DATA_DIR)
+
+        binance_feed = BinanceFootprintFeed(ALL_SYMBOLS, store)
+        stop = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        def sig_handler():
+            log.info("Shutdown signal received. Stopping...")
+            stop.set()
+            binance_feed.running = False
+
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, sig_handler)
+            except NotImplementedError:
+                pass
+
+        tasks = [
+            asyncio.create_task(binance_feed.run()),
+            asyncio.create_task(renderer_loop(store, stop)),
+            asyncio.create_task(watchdog([binance_feed], stop)),
+        ]
+
+        log.info("Engine_1 running (browser-less mode) — waiting for market data...")
+        try:
+            while not stop.is_set():
+                await asyncio.sleep(1.0)
+        except (KeyboardInterrupt, SystemExit):
+            sig_handler()
+        finally:
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            if hasattr(trade_tracker, 'broker_executor') and trade_tracker.broker_executor:
+                trade_tracker.broker_executor.shutdown(wait=True)
+            ML_EXECUTOR.shutdown(wait=True)
+        return
 
     # Launch Playwright for Coinglass Tabs
     log.info("[Startup] Launching Chromium instance with persistent profile...")
@@ -1551,9 +1594,32 @@ if __name__ == "__main__":
     parser.add_argument("--live", action="store_true", help="Start live trading")
     parser.add_argument("--skip-seed", action="store_true", help="Skip historical seeding")
     parser.add_argument("--skip-train", action="store_true", help="Skip model clearing and retraining")
+    parser.add_argument("--skip-browser", action="store_true", help="Skip Playwright Chromium (pure Binance feed)")
+    parser.add_argument("--ui-only", action="store_true", help="Convenience: --skip-seed --skip-train --skip-browser")
+    parser.add_argument("--active-strategies", type=str, metavar="S2,S3,S6",
+                        help="Comma-separated strategies to ENABLE (e.g., S2,S3,S6)")
+    parser.add_argument("--skip-strategies", type=str, metavar="S1",
+                        help="Comma-separated strategies to DISABLE")
     parser.add_argument("--backtest", type=str, metavar="SYMBOL",
                         help="Run backtest on one symbol")
     args = parser.parse_args()
+
+    # UI-ONLY convenience
+    if args.ui_only:
+        args.skip_seed = True
+        args.skip_train = True
+        args.skip_browser = True
+        args.live = True
+
+    # Strategy selection
+    from ensemble_strategy_predictor import resolve_active_strategies
+    active_strategies = None
+    if args.active_strategies:
+        active_strategies = resolve_active_strategies(
+            active=[s.strip() for s in args.active_strategies.split(",") if s.strip()])
+    elif args.skip_strategies:
+        active_strategies = resolve_active_strategies(
+            skip=[s.strip() for s in args.skip_strategies.split(",") if s.strip()])
 
     if args.backtest:
         results = run_backtest(args.backtest)
@@ -1580,6 +1646,8 @@ if __name__ == "__main__":
             print(f"\n  ⭐ ENSEMBLE = trades requiring 3+/6 strategy agreement")
             print(f"  Note: Live engine adds risk gov, circuit breakers, MT5 execution")
     elif args.live:
-        asyncio.run(main_async(skip_seed=args.skip_seed, skip_train=args.skip_train))
+        asyncio.run(main_async(skip_seed=args.skip_seed, skip_train=args.skip_train,
+                               skip_browser=args.skip_browser,
+                               active_strategies=active_strategies))
     else:
         smoke_test()
