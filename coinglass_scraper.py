@@ -51,14 +51,14 @@ SINGLE_FRAME_EXTRACTION_JS = """
             res.close = vals[vals.length - 1];
         }
         
-        // Extract indicators from legend items
-        let legends = document.querySelectorAll('.pane-legend-item, [class*="legendItem"], [class*="legend"]');
+        // Extract indicators from legend items & TradingView panes
+        let legends = document.querySelectorAll('.pane-legend-item, [class*="legendItem"], [class*="legend"], [class*="study"], [class*="source"], [data-name*="legend"], [data-name*="study"]');
         legends.forEach(el => {
             let txt = el.innerText || '';
             let upper = txt.toUpperCase();
             
-            let valSubEls = el.querySelectorAll('.pane-legend-value, [class*="legendValue"], [class*="value"]');
-            let numStrs = Array.from(valSubEls).map(v => v.innerText.trim()).filter(v => v && v !== 'N/A');
+            let valSubEls = el.querySelectorAll('.pane-legend-value, [class*="legendValue"], [class*="value"], span');
+            let numStrs = Array.from(valSubEls).map(v => v.innerText.trim()).filter(v => v && v !== 'N/A' && !v.includes('\n'));
             
             let num = numStrs.length > 0 ? numStrs[numStrs.length - 1] : null;
             if (!num) {

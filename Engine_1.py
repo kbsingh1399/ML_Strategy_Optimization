@@ -48,6 +48,9 @@ except ImportError:
 import numpy as np
 import pandas as pd
 
+import os
+os.system('')  # Enable VT100 ANSI escape processing in Windows cmd.exe
+
 # ─── LOGGING ────────────────────────────────────────────────────────────────
 logging.basicConfig(
     level=logging.INFO,
@@ -995,12 +998,15 @@ async def seed_all_symbols(predictor, symbols: list, data_dir: Path):
 async def renderer_loop(store: SnapshotStore, stop: asyncio.Event) -> None:
     """Rich terminal live display loop."""
     try:
+        import os
+        os.system('')  # Enable VT100 ANSI processing in Windows cmd.exe
+        os.system('cls' if os.name == 'nt' else 'clear')
         from rich.console import Console
         from rich.live import Live
-        console = Console()
+        console = Console(force_terminal=True)
         with Live(render_table(store.snapshot(), store.trade_tracker),
                   console=console, refresh_per_second=REFRESH_HZ,
-                  screen=False) as live:
+                  screen=False, vertical_overflow="visible") as live:
             while not stop.is_set():
                 snap = store.snapshot()
                 live.update(render_table(snap, store.trade_tracker))
