@@ -945,20 +945,19 @@ async def seed_all_symbols(predictor, symbols: list, data_dir: Path, store: Snap
                         df["open_time"] = df["_ts"].astype("int64") // 10**9
                         df = df.drop(columns=["_ts"], errors="ignore")
 
-                    # Take last 1200 bars
-                    df = df.tail(1200)
-
-                    candles = df.reset_index(drop=True).to_dict("records")
-
-                    # Ensure every row has open_time
-                    candles = [{**r, "open_time": int(r.get("open_time",
-                               int(pd.Timestamp.now().timestamp())))} for r in candles]
-
-                    predictor.set_history(sym, candles)
-
-                    # Seed initial SnapshotStore indicator values from last parquet row
+                    # Extract initial SnapshotStore indicator values from full df BEFORE tail(1200) cutoff
                     if store and len(df) > 0:
-                        last_rec = df.iloc[-1].to_dict()
+                        def get_last_nonzero(col_names):
+                            for col in col_names:
+                                if col in df.columns:
+                                    s = pd.to_numeric(df[col], errors='coerce').dropna()
+                                    nz = s[s != 0]
+                                    if len(nz) > 0:
+                                        return float(nz.iloc[-1])
+                                    elif len(s) > 0:
+                                        return float(s.iloc[-1])
+                            return 0.0
+
                         rsi_val = 50.0
                         if "Close" in df.columns and len(df) >= 14:
                             delta = df["Close"].diff()
@@ -970,19 +969,40 @@ async def seed_all_symbols(predictor, symbols: list, data_dir: Path, store: Snap
                             if not pd.isna(last_rsi):
                                 rsi_val = float(last_rsi)
 
+                        price_val = get_last_nonzero(["Close", "close", "Price", "price"])
+                        vol_val = get_last_nonzero(["Volume", "volume"])
+                        cvd_val = get_last_nonzero(["CVD", "fut_cvd", "futures_cvd"])
+                        oi_val = get_last_nonzero(["Agg. OI", "oi", "open_interest"])
+                        fund_val = get_last_nonzero(["Agg. Funding Rate", "funding", "funding_rate"])
+                        ls_val = get_last_nonzero(["Long/Short Ratio (Account)", "ls_ratio", "Long/Short Ratio"])
+                        liql_val = get_last_nonzero(["Agg. Liq Long", "liq_long", "liquidations_long"])
+                        liqs_val = get_last_nonzero(["Agg. Liq Short", "liq_short", "liquidations_short"])
+
                         await store.update(
                             sym,
                             source="seeding",
-                            price=float(last_rec.get("Close") or last_rec.get("close") or 0.0),
+                            price=price_val,
+                            volume=vol_val,
                             rsi=rsi_val,
-                            fut_cvd=float(last_rec.get("CVD") or last_rec.get("fut_cvd") or 0.0),
-                            oi=float(last_rec.get("Agg. OI") or last_rec.get("oi") or 0.0),
-                            funding=float(last_rec.get("Agg. Funding Rate") or last_rec.get("funding") or 0.0),
-                            ls_ratio=float(last_rec.get("Long/Short Ratio (Account)") or last_rec.get("ls_ratio") or 0.0),
-                            liq_long=float(last_rec.get("Agg. Liq Long") or last_rec.get("liq_long") or 0.0),
-                            liq_short=float(last_rec.get("Agg. Liq Short") or last_rec.get("liq_short") or 0.0)
+                            fut_cvd=cvd_val,
+                            spot_cvd=cvd_val,
+                            oi=oi_val,
+                            funding=fund_val,
+                            ls_ratio=ls_val,
+                            liq_long=liql_val,
+                            liq_short=liqs_val
                         )
 
+                    # Take last 1200 bars for predictor history
+                    df = df.tail(1200)
+
+                    candles = df.reset_index(drop=True).to_dict("records")
+
+                    # Ensure every row has open_time
+                    candles = [{**r, "open_time": int(r.get("open_time",
+                               int(pd.Timestamp.now().timestamp())))} for r in candles]
+
+                    predictor.set_history(sym, candles)
                     log.info(f"[Seeding] {sym}: loaded {len(candles)} bars from {p.name}")
                     return
                 except Exception as e:
