@@ -1103,6 +1103,14 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False,
         raise RuntimeError("Playwright package is missing. Please run: pip install playwright && python -m playwright install chromium")
     async with async_playwright() as pw:
         user_data_dir = BASE_DIR / "chrome_profile"
+        user_data_dir.mkdir(parents=True, exist_ok=True)
+        import subprocess
+        try:
+            subprocess.run(["powershell", "-Command", "Get-Process chrome,chromium -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue"], capture_output=True)
+            for lk in ["LOCK", "SingletonLock", "SingletonSocket", "SingletonCookie"]:
+                (user_data_dir / lk).unlink(missing_ok=True)
+        except Exception:
+            pass
         ctx = await pw.chromium.launch_persistent_context(
             user_data_dir,
             headless=False,
