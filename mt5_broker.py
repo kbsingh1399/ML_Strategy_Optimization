@@ -82,7 +82,7 @@ class MT5Broker:
                 return self.connect()
             info = mt5.terminal_info()
             if info is None or not getattr(info, "connected", False):
-                print("[MT5] Connection lost. Re-initializing connection...")
+                log.info("[MT5] Connection lost. Re-initializing connection...")
                 self.connected = False
                 return self.connect()
             return True

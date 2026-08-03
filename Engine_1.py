@@ -349,7 +349,8 @@ class SnapshotStore:
 
             # Run exit checks
             if self.trade_tracker and "price" in clean_patch:
-                self.trade_tracker.check_exits(symbol, new_snap.price)
+                cur_atr = getattr(new_snap, 'atr', 0.0)
+                self.trade_tracker.check_exits(symbol, new_snap.price, current_atr=cur_atr)
                 self.trade_tracker.update_live_pnl(symbol, new_snap.price)
 
             self._data[symbol] = new_snap
@@ -716,7 +717,8 @@ class Engine1TradeTracker:
 
                 # Trailing stop logic
                 trail_act = trade.get('trail_act', 1.0)
-                if sl_dist and trail_act > 0.0 and current_atr > 0:
+                atr_effective = current_atr if current_atr > 0 else trade.get('atr', 0.0)
+                if sl_dist and trail_act > 0.0 and atr_effective > 0:
                     if direction == 1:
                         cur_r = (current_price - entry_price) / sl_dist
                         if cur_r >= trail_act:
