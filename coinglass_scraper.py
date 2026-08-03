@@ -477,13 +477,13 @@ class CoinglassTab:
                 log.debug(f"[{self.tab_id}] [POLL ERROR] Outer: {e}")
                 self.poll_failures += 1
             
-            if self.poll_failures > 5:
-                log.info(f"[{self.tab_id}] [WATCHDOG] Max failures exceeded ({self.poll_failures}). Auto-healing by reloading page...")
+            if self.poll_failures > 60:
+                log.debug(f"[{self.tab_id}] [WATCHDOG] Max failures exceeded ({self.poll_failures}). Auto-healing page...")
                 try:
-                    await self.page.reload(wait_until="load", timeout=30000)
+                    await self.page.reload(wait_until="domcontentloaded", timeout=30000)
                     self.poll_failures = 0
                 except Exception as ex:
-                    log.info(f"[{self.tab_id}] [WATCHDOG] Failed to reload page: {ex}")
+                    log.debug(f"[{self.tab_id}] [WATCHDOG] Failed to reload page: {ex}")
                     self.poll_failures = 0
 
             await asyncio.sleep(0.5)
