@@ -306,6 +306,10 @@ class CoinglassTab:
             log.info(f"[{self.tab_id}] [WARN] Screenshot failed: {e}")
         log.info(f"[{self.tab_id}] Setup & Indicator injection complete.")
 
+    async def run(self) -> None:
+        """Alias for poll_loop to maintain compatibility with engine tasks"""
+        await self.poll_loop()
+
     async def poll_loop(self) -> None:
         """Background data poller extracting DOM legend values & JS shims"""
         async def _fetch_frame(win_idx: int) -> bool:
