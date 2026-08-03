@@ -30,7 +30,7 @@ URL = "https://www.coinglass.com/tv/layout/s9"
 BASE_DIR = Path(__file__).parent
 base_dir = BASE_DIR
 
-SINGLE_FRAME_EXTRACTION_JS = """
+SINGLE_FRAME_EXTRACTION_JS = r"""
 () => {
     try {
         let res = {};
@@ -62,8 +62,8 @@ SINGLE_FRAME_EXTRACTION_JS = """
             
             let num = numStrs.length > 0 ? numStrs[numStrs.length - 1] : null;
             if (!num) {
-                let match = txt.match(/[\\d.,KMBkmb%+-]+/g);
-                if (match) num = match[match.length - 1].trim();
+                let match = txt.match(/[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?[KMBkmb%]?/g);
+                if (match && match.length > 0) num = match[match.length - 1].trim();
             }
             
             if (upper.includes('RSI') && num) res.rsi = num;
@@ -418,7 +418,7 @@ class CoinglassTab:
                         try:
                             res = await frame.evaluate(SINGLE_FRAME_EXTRACTION_JS)
                         except Exception as eval_exc:
-                            log.info(f"[{self.tab_id}] [POLL ERROR] {sym} frame eval: {eval_exc}")
+                            log.debug(f"[{self.tab_id}] [POLL ERROR] {sym} frame eval: {eval_exc}")
                             return False
                         if res and res.get("success"):
                             d = res["data"]
@@ -463,7 +463,7 @@ class CoinglassTab:
                 has_success = False
                 for r in results:
                     if isinstance(r, Exception):
-                        log.info(f"[{self.tab_id}] [POLL ERROR] Subtask failed: {r}")
+                        log.debug(f"[{self.tab_id}] [POLL ERROR] Subtask failed: {r}")
                         self.poll_failures += 1
                     elif r is True:
                         has_success = True
@@ -474,7 +474,7 @@ class CoinglassTab:
                 else:
                     self.poll_failures += 1
             except Exception as e:
-                log.info(f"[{self.tab_id}] [POLL ERROR] Outer: {e}")
+                log.debug(f"[{self.tab_id}] [POLL ERROR] Outer: {e}")
                 self.poll_failures += 1
             
             if self.poll_failures > 5:
