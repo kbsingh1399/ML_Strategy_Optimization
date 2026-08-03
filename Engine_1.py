@@ -54,7 +54,7 @@ logging.basicConfig(
     format='[%(asctime)s] [%(levelname)s] %(message)s',
     handlers=[
         logging.FileHandler("engine_log.txt", encoding="utf-8"),
-        logging.StreamHandler(sys.stdout)
+        logging.StreamHandler(sys.stderr)
     ]
 )
 log = logging.getLogger('Engine_1')
