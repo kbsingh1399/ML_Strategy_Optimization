@@ -196,14 +196,14 @@ class CoinglassTab:
             if any(p in text for p in skip_patterns):
                 return
             if typ in ("error", "warning") or "coinglass" in text.lower():
-                log.info(f"[{self.tab_id} CONSOLE] {typ} {text}")
+                log.debug(f"[{self.tab_id} CONSOLE] {typ} {text}")
 
         def _on_page_error(exc):
             msg = str(exc)
             # Filter generic browser resource errors that are not actionable
             if any(p in msg for p in ("unknown compression", "net::", "ERR_", "Failed to fetch", "ResizeObserver", "reading 'symbol'")):
                 return
-            log.info(f"[{self.tab_id} PAGE ERROR] {msg}")
+            log.debug(f"[{self.tab_id} PAGE ERROR] {msg}")
 
         self.page.on("console", _on_console)
         self.page.on("pageerror", _on_page_error)
