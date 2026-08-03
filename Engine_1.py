@@ -338,6 +338,10 @@ class SnapshotStore:
                 try:
                     fv = float(v)
                     if math.isfinite(fv):
+                        cur_v = getattr(cur, k, 0.0)
+                        # Preserve existing non-zero indicator values if incoming patch value is 0.0
+                        if fv == 0.0 and cur_v != 0.0 and k not in ("price", "fp_delta", "fp_poc"):
+                            continue
                         clean_patch[k] = fv
                 except (ValueError, TypeError):
                     continue
@@ -1000,13 +1004,12 @@ async def renderer_loop(store: SnapshotStore, stop: asyncio.Event) -> None:
     try:
         import os
         os.system('')  # Enable VT100 ANSI processing in Windows cmd.exe
-        os.system('cls' if os.name == 'nt' else 'clear')
         from rich.console import Console
         from rich.live import Live
         console = Console(force_terminal=True)
         with Live(render_table(store.snapshot(), store.trade_tracker),
                   console=console, refresh_per_second=REFRESH_HZ,
-                  screen=False, vertical_overflow="visible") as live:
+                  screen=True) as live:
             while not stop.is_set():
                 snap = store.snapshot()
                 live.update(render_table(snap, store.trade_tracker))
