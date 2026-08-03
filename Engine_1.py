@@ -35,6 +35,16 @@ from dataclasses import dataclass, field
 from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 
+try:
+    from playwright.async_api import async_playwright
+except ImportError:
+    async_playwright = None
+
+try:
+    from coinglass_scraper import CoinglassTab
+except ImportError:
+    CoinglassTab = None
+
 import numpy as np
 import pandas as pd
 
@@ -1027,6 +1037,8 @@ async def main_async(skip_seed: bool = False) -> None:
 
     # Launch Playwright for Coinglass Tabs
     log.info("[Startup] Launching Chromium instance with persistent profile...")
+    if async_playwright is None:
+        raise RuntimeError("Playwright package is missing. Please run: pip install playwright && python -m playwright install chromium")
     async with async_playwright() as pw:
         user_data_dir = BASE_DIR / "chrome_profile"
         ctx = await pw.chromium.launch_persistent_context(
@@ -1091,6 +1103,8 @@ async def main_async(skip_seed: bool = False) -> None:
             log.info("[Startup] Form inputs not detected, assuming session already active.")
 
         # Initialize Tabs
+        if CoinglassTab is None:
+            raise RuntimeError("coinglass_scraper module missing or failed to import CoinglassTab.")
         tab1 = CoinglassTab(ctx, TAB1_SYMBOLS, store, "TAB_1")
         tab2 = CoinglassTab(ctx, TAB2_SYMBOLS, store, "TAB_2")
 
