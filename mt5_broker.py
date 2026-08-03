@@ -46,6 +46,9 @@ class MT5Broker:
         self.magic = magic
 
     def connect(self):
+        if self.dry_run:
+            self.connected = True
+            return True
         with self._lock:
             now = time.time()
             # Backoff: 1s, 2s, 4s ... cap 30s between re-init attempts

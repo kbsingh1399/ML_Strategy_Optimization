@@ -34,16 +34,41 @@ SINGLE_FRAME_EXTRACTION_JS = """
 () => {
     try {
         let res = {};
+        // Extract symbol from title
+        let titleEl = document.querySelector('.pane-legend-title, [class*="legendTitle"], [class*="title"]');
+        if (titleEl) res.symbol = titleEl.innerText.trim();
+        
+        // Extract OHLCV from main legend line values
+        let valueEls = document.querySelectorAll('.pane-legend-value, [class*="legendValue"], [class*="lastValue"]');
+        let vals = Array.from(valueEls).map(el => el.innerText.trim()).filter(v => v && v !== 'N/A');
+        if (vals.length >= 5) {
+            res.open = vals[0];
+            res.high = vals[1];
+            res.low = vals[2];
+            res.close = vals[3];
+            res.volume = vals[4];
+        } else if (vals.length >= 1) {
+            res.close = vals[vals.length - 1];
+        }
+        
+        // Extract indicators from legend items
         let legends = document.querySelectorAll('.pane-legend-item, [class*="legend"]');
         legends.forEach(el => {
-            let txt = el.innerText || "";
-            if (txt.includes("RSI")) res.rsi = txt.split(/\\s+/).pop();
-            if (txt.includes("CVD")) res.futures_cvd = txt.split(/\\s+/).pop();
+            let txt = el.innerText || '';
+            let numMatch = txt.match(/[\\d.]+\\s*$/);
+            let num = numMatch ? numMatch[0].trim() : null;
+            let upper = txt.toUpperCase();
+            if (upper.includes('RSI') && num) res.rsi = num;
+            if (upper.includes('CVD') && upper.includes('SPOT') && num) res.spot_cvd = num;
+            if (upper.includes('CVD') && !upper.includes('SPOT') && num) res.futures_cvd = num;
         });
-        let titleEl = document.querySelector('.pane-legend-title, [class*="title"]');
-        if (titleEl) res.symbol = titleEl.innerText;
-        let priceEl = document.querySelector('.pane-legend-value, [class*="lastValue"]');
-        if (priceEl) res.close = priceEl.innerText;
+        
+        // Fallback for close from price line
+        if (!res.close) {
+            let priceEl = document.querySelector('.pane-legend-value, [class*="lastValue"]');
+            if (priceEl) res.close = priceEl.innerText;
+        }
+        
         return { success: true, data: res };
     } catch (e) {
         return { success: false, error: e.toString() };
@@ -208,9 +233,10 @@ class CoinglassTab:
 
     async def inject_and_configure_all(self, focus_lock: asyncio.Lock):
         """Programmatic JS-based S9 indicator & symbol configuration"""
-        log.info(f"[{self.tab_id}] Bringing tab to front...")
-        await self.page.bring_to_front()
-        await asyncio.sleep(0.5)
+        async with focus_lock:
+            log.info(f"[{self.tab_id}] Bringing tab to front...")
+            await self.page.bring_to_front()
+            await asyncio.sleep(0.5)
         
         # Wait for layout containers to render fully
         try:
@@ -1477,7 +1503,7 @@ async def main(skip_seed: bool = False) -> None:
                                 raise
                             await asyncio.sleep(3.0)
                 finally:
-                    tab.is_seeding = False
+                    pass
 
             seeding_tasks = [seed_wrapper(tab1, sym) for sym in TAB1_SYMBOLS] + \
                             [seed_wrapper(tab2, sym) for sym in TAB2_SYMBOLS]

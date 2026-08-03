@@ -952,6 +952,33 @@ async def seed_all_symbols(predictor, symbols: list, data_dir: Path):
                 except Exception as e:
                     log.warning(f"[Seeding] {sym}: failed to load {p.name} — {e}")
 
+        # Fallback: try Excel seeding file
+        excel_path = BASE_DIR / "Seeding" / "combined_seed_history.xlsx"
+        if excel_path.exists():
+            try:
+                df = pd.read_excel(excel_path, sheet_name=sym)
+                ts_col = None
+                for candidate in ["open_time", "TimeStamp", "Timestamp", "time", "ts"]:
+                    if candidate in df.columns:
+                        ts_col = candidate
+                        break
+                if ts_col:
+                    df["_ts"] = pd.to_datetime(
+                        df[ts_col].astype(str).str.replace(" IST", "", regex=False),
+                        errors="coerce"
+                    )
+                    df["open_time"] = df["_ts"].astype("int64") // 10**9
+                    df = df.drop(columns=["_ts"], errors="ignore")
+                df = df.tail(1200)
+                candles = df.reset_index(drop=True).to_dict("records")
+                candles = [{**r, "open_time": int(r.get("open_time",
+                           int(pd.Timestamp.now().timestamp())))} for r in candles]
+                predictor.set_history(sym, candles)
+                log.info(f"[Seeding] {sym}: loaded {len(candles)} bars from combined_seed_history.xlsx")
+                return
+            except Exception as e:
+                log.warning(f"[Seeding] {sym}: failed to load from Excel — {e}")
+
         log.warning(f"[Seeding] {sym}: no parquet data found, starting cold.")
 
     await asyncio.gather(*[seed_one(s) for s in symbols])
@@ -1004,29 +1031,7 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False) -> None:
     log.info(f"Symbols: {len(ALL_SYMBOLS)} total ({len(TAB1_SYMBOLS)} Tab1 + {len(TAB2_SYMBOLS)} Tab2)")
     log.info("=" * 60)
 
-    if not skip_train:
-        # 1. Clear Old Models
-        models_dir = BASE_DIR / "models"
-        if models_dir.exists():
-            shutil.rmtree(models_dir)
-        models_dir.mkdir(parents=True, exist_ok=True)
-        log.info("[Startup] Cleared old models directory.")
-
-        # 2. Retrain Models on Latest GDrive Data
-        log.info("[Startup] Step 2/5 — Retraining models on latest GDrive data...")
-        try:
-            from live_model_trainer import train_all_strategies
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, train_all_strategies)
-            log.info("[Startup] Model retraining complete.")
-        except ImportError:
-            log.warning("[Startup] live_model_trainer.py not found — skipping model training.")
-        except Exception as e:
-            log.warning(f"[Startup] Model training failed ({e}), continuing with existing models if any.")
-    else:
-        log.info("[Startup] Skipping model clearing and retraining (--skip-train).")
-
-    # 3. Initialize Core Components
+    # 1. Initialize Core Components
     trade_tracker = Engine1TradeTracker()
     trade_tracker.update_day()
 
@@ -1128,7 +1133,7 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False) -> None:
         tab1 = CoinglassTab(ctx, TAB1_SYMBOLS, store, "TAB_1")
         tab2 = CoinglassTab(ctx, TAB2_SYMBOLS, store, "TAB_2")
 
-        log.info("[Startup] Step 3/5 — Starting 2 Coinglass Chrome tabs...")
+        log.info("[Startup] Step 2/5 — Starting 2 Coinglass Chrome tabs...")
         await asyncio.gather(tab1.start(), tab2.start())
 
         try:
@@ -1146,7 +1151,7 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False) -> None:
         from concurrent.futures import ThreadPoolExecutor
         excel_pool = ThreadPoolExecutor(max_workers=4)
         if not skip_seed:
-            log.info("[Startup] Step 4/5 — Seeding via Chrome DOM...")
+            log.info("[Startup] Step 3/5 — Seeding via Chrome DOM...")
             async def seed_wrapper(tab: CoinglassTab, sym: str):
                 for attempt in range(3):
                     try:
@@ -1170,10 +1175,45 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False) -> None:
             log.info("[Startup] Seeding complete. Merging CSVs to Parquet...")
             combine_seeding_files()
             
-            # Now call the engine's original parquet loader to feed predictor
-            await seed_all_symbols(predictor, ALL_SYMBOLS, DATA_DIR)
         else:
-            log.info("[Startup] Step 4/5 — Skipping seeding (--skip-seed flag).")
+            log.info("[Startup] Step 3/5 — Skipping seeding (--skip-seed flag).")
+
+        if not skip_train:
+            # 4. Retrain Models on Latest GDrive Data
+            log.info("[Startup] Step 4/5 — Retraining models on latest GDrive data...")
+            models_dir = BASE_DIR / "models"
+            models_tmp = BASE_DIR / "models_training_tmp"
+            models_old = BASE_DIR / "models_old_backup"
+            if models_tmp.exists():
+                shutil.rmtree(models_tmp)
+            models_tmp.mkdir(parents=True, exist_ok=True)
+            log.info("[Startup] Preparing temporary model training directory.")
+
+            try:
+                from live_model_trainer import train_all_strategies
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(None, train_all_strategies)
+                
+                # Atomic swap: tmp → models
+                if models_old.exists():
+                    shutil.rmtree(models_old)
+                if models_dir.exists():
+                    models_dir.rename(models_old)
+                models_tmp.rename(models_dir)
+                if models_old.exists():
+                    shutil.rmtree(models_old)
+                log.info("[Startup] Model retraining complete — swapped in new models.")
+            except ImportError:
+                log.warning("[Startup] live_model_trainer.py not found — skipping model training.")
+            except Exception as e:
+                log.warning(f"[Startup] Model training failed ({e}), keeping existing models.")
+                if models_tmp.exists():
+                    shutil.rmtree(models_tmp)
+        else:
+            log.info("[Startup] Step 4/5 — Skipping model clearing and retraining (--skip-train).")
+
+        # Now call the engine's original parquet loader to feed predictor
+        await seed_all_symbols(predictor, ALL_SYMBOLS, DATA_DIR)
 
         # 5. Warm-up Gate
         log.info("[Startup] Step 5/5 — Warm-up gate active...")
