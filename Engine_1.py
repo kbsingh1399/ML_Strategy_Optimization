@@ -996,13 +996,23 @@ async def renderer_loop(store: SnapshotStore, stop: asyncio.Event) -> None:
         from rich.console import Console
         from rich.live import Live
         console = Console(force_terminal=True)
-        with Live(render_table(store.snapshot(), store.trade_tracker),
-                  console=console, refresh_per_second=REFRESH_HZ,
-                  screen=True) as live:
-            while not stop.is_set():
-                snap = store.snapshot()
-                live.update(render_table(snap, store.trade_tracker))
-                await asyncio.sleep(1.0 / REFRESH_HZ)
+        
+        # Remove stdout StreamHandler while Rich Live is active to prevent terminal screen corruption
+        stream_handlers = [h for h in log.handlers if type(h) is logging.StreamHandler]
+        for h in stream_handlers:
+            log.removeHandler(h)
+
+        try:
+            with Live(render_table(store.snapshot(), store.trade_tracker),
+                      console=console, refresh_per_second=REFRESH_HZ,
+                      screen=True) as live:
+                while not stop.is_set():
+                    snap = store.snapshot()
+                    live.update(render_table(snap, store.trade_tracker))
+                    await asyncio.sleep(1.0 / REFRESH_HZ)
+        finally:
+            for h in stream_handlers:
+                log.addHandler(h)
     except ImportError:
         log.warning("Rich not installed — terminal dashboard disabled")
         while not stop.is_set():
