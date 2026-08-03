@@ -34,13 +34,24 @@ SINGLE_FRAME_EXTRACTION_JS = r"""
 () => {
     try {
         let res = {};
+        let getTxt = el => el ? (el.innerText || el.textContent || '').trim() : '';
+
         // Extract symbol from title
         let titleEl = document.querySelector('.pane-legend-title, [class*="legendTitle"], [class*="title"]');
-        if (titleEl) res.symbol = titleEl.innerText.trim();
+        if (titleEl) {
+            let fullTitle = getTxt(titleEl);
+            if (fullTitle) {
+                let parts = fullTitle.split(/[\s,]+/);
+                res.symbol = parts[0] || fullTitle;
+            }
+        }
         
         // Extract OHLCV from main legend line values
-        let valueEls = document.querySelectorAll('.pane-legend-value, [class*="legendValue"], [class*="lastValue"]');
-        let vals = Array.from(valueEls).map(el => el.innerText.trim()).filter(v => v && v !== 'N/A');
+        let mainLine = document.querySelector('.pane-legend-line:first-child, [class*="legendLine"]:first-child');
+        let valueEls = mainLine 
+            ? mainLine.querySelectorAll('.pane-legend-value, [class*="legendValue"], [class*="lastValue"]')
+            : document.querySelectorAll('.pane-legend-value, [class*="legendValue"], [class*="lastValue"]');
+        let vals = Array.from(valueEls).map(el => getTxt(el)).filter(v => v && v !== 'N/A' && !v.includes('\n'));
         if (vals.length >= 5) {
             res.open = vals[0];
             res.high = vals[1];
@@ -51,19 +62,37 @@ SINGLE_FRAME_EXTRACTION_JS = r"""
             res.close = vals[vals.length - 1];
         }
         
-        // Extract indicators from legend items & TradingView panes
-        let legends = document.querySelectorAll('.pane-legend-item, [class*="legendItem"], [class*="legend"], [class*="study"], [class*="source"], [data-name*="legend"], [data-name*="study"]');
+        // Extract indicators from study legend items
+        let legends = document.querySelectorAll('.pane-legend-item, [class*="legendItem"], [class*="study"]');
+        let rawLegends = [];
+        
         legends.forEach(el => {
-            let txt = el.innerText || '';
+            let txt = getTxt(el);
+            if (txt) rawLegends.push(txt);
             let upper = txt.toUpperCase();
             
-            let valSubEls = el.querySelectorAll('.pane-legend-value, [class*="legendValue"], [class*="value"], span');
-            let numStrs = Array.from(valSubEls).map(v => v.innerText.trim()).filter(v => v && v !== 'N/A' && !v.includes('\n'));
+            // Query ONLY explicit value containers, excluding title/name/source elements
+            let valSubEls = el.querySelectorAll('.pane-legend-value, [class*="legendValue"], [class*="value"]');
+            let valStrs = Array.from(valSubEls)
+                .filter(v => {
+                    let cls = (v.className || '').toString().toLowerCase();
+                    return !cls.includes('title') && !cls.includes('name') && !cls.includes('source') && !cls.includes('alias');
+                })
+                .map(v => getTxt(v))
+                .filter(v => v && v !== 'N/A' && !v.includes('\n'));
             
-            let num = numStrs.length > 0 ? numStrs[numStrs.length - 1] : null;
+            // Filter to valid numeric strings
+            let numStrs = valStrs.filter(v => /[-+]?\d*\.?\d+/.test(v));
+            
+            // If no explicit value containers, parse text stripped of title parentheses parameters
+            let num = numStrs.length > 0 ? numStrs[0] : null;
             if (!num) {
-                let match = txt.match(/[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?[KMBkmb%]?/g);
-                if (match && match.length > 0) num = match[match.length - 1].trim();
+                // Strip title parameters like (14, close, SMA, 14, 2) before regex matching
+                let cleanedTxt = txt.replace(/\([^)]*\)/g, '');
+                let match = cleanedTxt.match(/[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?[KMBkmb%]?/g);
+                if (match && match.length > 0) {
+                    num = match[0].trim();
+                }
             }
             
             if (upper.includes('RSI') && num) res.rsi = num;
@@ -86,12 +115,12 @@ SINGLE_FRAME_EXTRACTION_JS = r"""
         // Fallback for close from price line
         if (!res.close) {
             let priceEl = document.querySelector('.pane-legend-value, [class*="lastValue"]');
-            if (priceEl) res.close = priceEl.innerText;
+            if (priceEl) res.close = getTxt(priceEl);
         }
         
-        return { success: true, data: res };
+        return { success: true, data: res, rawLegends: rawLegends };
     } catch (e) {
-        return { success: false, error: e.toString() };
+        return { success: false, error: e.toString(), rawLegends: [] };
     }
 }
 """
