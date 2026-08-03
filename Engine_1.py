@@ -52,7 +52,10 @@ import pandas as pd
 logging.basicConfig(
     level=logging.INFO,
     format='[%(asctime)s] [%(levelname)s] %(message)s',
-    handlers=[logging.FileHandler("engine_log.txt", encoding="utf-8")]
+    handlers=[
+        logging.FileHandler("engine_log.txt", encoding="utf-8"),
+        logging.StreamHandler(sys.stdout)
+    ]
 )
 log = logging.getLogger('Engine_1')
 
