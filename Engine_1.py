@@ -911,14 +911,10 @@ def render_table(snap: Dict[str, AssetSnapshot], trade_tracker=None):
 
 # ─── SEEDING ───────────────────────────────────────────────────────────────
 
-async def seed_all_symbols(predictor, symbols: list, data_dir: Path):
+async def seed_all_symbols(predictor, symbols: list, data_dir: Path, store: SnapshotStore = None):
     """
     Seed EnsembleStrategyPredictor with up to 1200 historical 15m bars
-    for every symbol from parquet files.
-
-    Tries multiple paths:
-      1. G:\\My Drive\\_Trading_Data\\15m\\parquet (Google Drive)
-      2. Backtesting_Data/ (local fallback)
+    for every symbol from parquet files, and populate initial SnapshotStore indicators.
     """
     log.info(f"[Startup] Step 4/5 — Seeding {len(symbols)} symbols...")
 
@@ -959,6 +955,34 @@ async def seed_all_symbols(predictor, symbols: list, data_dir: Path):
                                int(pd.Timestamp.now().timestamp())))} for r in candles]
 
                     predictor.set_history(sym, candles)
+
+                    # Seed initial SnapshotStore indicator values from last parquet row
+                    if store and len(df) > 0:
+                        last_rec = df.iloc[-1].to_dict()
+                        rsi_val = 50.0
+                        if "Close" in df.columns and len(df) >= 14:
+                            delta = df["Close"].diff()
+                            gain = (delta.where(delta > 0, 0)).rolling(14).mean()
+                            loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+                            rs = gain / (loss + 1e-9)
+                            rsi_series = 100 - (100 / (1 + rs))
+                            last_rsi = rsi_series.iloc[-1]
+                            if not pd.isna(last_rsi):
+                                rsi_val = float(last_rsi)
+
+                        await store.update(
+                            sym,
+                            source="seeding",
+                            price=float(last_rec.get("Close") or last_rec.get("close") or 0.0),
+                            rsi=rsi_val,
+                            fut_cvd=float(last_rec.get("CVD") or last_rec.get("fut_cvd") or 0.0),
+                            oi=float(last_rec.get("Agg. OI") or last_rec.get("oi") or 0.0),
+                            funding=float(last_rec.get("Agg. Funding Rate") or last_rec.get("funding") or 0.0),
+                            ls_ratio=float(last_rec.get("Long/Short Ratio (Account)") or last_rec.get("ls_ratio") or 0.0),
+                            liq_long=float(last_rec.get("Agg. Liq Long") or last_rec.get("liq_long") or 0.0),
+                            liq_short=float(last_rec.get("Agg. Liq Short") or last_rec.get("liq_short") or 0.0)
+                        )
+
                     log.info(f"[Seeding] {sym}: loaded {len(candles)} bars from {p.name}")
                     return
                 except Exception as e:
@@ -1277,8 +1301,8 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False,
         else:
             log.info("[Startup] Step 4/5 — Skipping model clearing and retraining (--skip-train).")
 
-        # Now call the engine's original parquet loader to feed predictor
-        await seed_all_symbols(predictor, ALL_SYMBOLS, DATA_DIR)
+        # Now call the engine's original parquet loader to feed predictor and snapshot store
+        await seed_all_symbols(predictor, ALL_SYMBOLS, DATA_DIR, store=store)
 
         # 5. Warm-up Gate
         log.info("[Startup] Step 5/5 — Warm-up gate active...")
