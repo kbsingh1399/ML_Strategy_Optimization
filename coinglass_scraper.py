@@ -47,19 +47,37 @@ SINGLE_FRAME_EXTRACTION_JS = r"""
         }
         
         // Extract OHLCV from main legend line values
-        let mainLine = document.querySelector('.pane-legend-line:first-child, [class*="legendLine"]:first-child');
-        let valueEls = mainLine 
-            ? mainLine.querySelectorAll('.pane-legend-value, [class*="legendValue"], [class*="lastValue"]')
-            : document.querySelectorAll('.pane-legend-value, [class*="legendValue"], [class*="lastValue"]');
-        let vals = Array.from(valueEls).map(el => getTxt(el)).filter(v => v && v !== 'N/A' && !v.includes('\n'));
-        if (vals.length >= 5) {
-            res.open = vals[0];
-            res.high = vals[1];
-            res.low = vals[2];
-            res.close = vals[3];
-            res.volume = vals[4];
-        } else if (vals.length >= 1) {
-            res.close = vals[vals.length - 1];
+        let mainLine = document.querySelector('.pane-legend-line:first-child, [class*="legendLine"]:first-child, [class*="legendMainSourceWrapper"]');
+        if (mainLine) {
+            let valueItems = mainLine.querySelectorAll('.pane-legend-value, [class*="legendValue"], [class*="lastValue"], [class*="valueItem-"]');
+            let hasMapped = false;
+            valueItems.forEach(el => {
+                let titleEl = el.querySelector('[class*="valueTitle-"]');
+                let valEl = el.querySelector('[class*="valueValue-"]');
+                if (titleEl && valEl) {
+                    let title = getTxt(titleEl);
+                    let val = getTxt(valEl);
+                    if (title === 'O') { res.open = val; hasMapped = true; }
+                    if (title === 'H') { res.high = val; hasMapped = true; }
+                    if (title === 'L') { res.low = val; hasMapped = true; }
+                    if (title === 'C') { res.close = val; hasMapped = true; }
+                    if (title === 'Vol') { res.volume = val; hasMapped = true; }
+                }
+            });
+            if (!hasMapped) {
+                // Old fallback: get all texts
+                let valueEls = mainLine.querySelectorAll('.pane-legend-value, [class*="legendValue"], [class*="lastValue"]');
+                let vals = Array.from(valueEls).map(el => getTxt(el)).filter(v => v && v !== 'N/A' && !v.includes('\n'));
+                if (vals.length >= 5) {
+                    res.open = vals[0];
+                    res.high = vals[1];
+                    res.low = vals[2];
+                    res.close = vals[3];
+                    res.volume = vals[4];
+                } else if (vals.length >= 1) {
+                    res.close = vals[vals.length - 1];
+                }
+            }
         }
         
         // Extract indicators from study legend items
@@ -72,8 +90,9 @@ SINGLE_FRAME_EXTRACTION_JS = r"""
             let upper = txt.toUpperCase();
             
             // Query ONLY explicit value containers, excluding title/name/source elements
-            let valSubEls = el.querySelectorAll('.pane-legend-value, [class*="legendValue"], [class*="value"]');
-            let valStrs = Array.from(valSubEls)
+            let valSubEls = el.querySelectorAll('.pane-legend-value, [class*="legendValue"], [class*="value"], [class*="valueValue-"]');
+            let leafValEls = Array.from(valSubEls).filter(parent => !Array.from(valSubEls).some(child => parent !== child && parent.contains(child)));
+            let valStrs = leafValEls
                 .filter(v => {
                     let cls = (v.className || '').toString().toLowerCase();
                     return !cls.includes('title') && !cls.includes('name') && !cls.includes('source') && !cls.includes('alias');
@@ -81,24 +100,36 @@ SINGLE_FRAME_EXTRACTION_JS = r"""
                 .map(v => getTxt(v))
                 .filter(v => v && v !== 'N/A' && !v.includes('\n'));
             
-            // Filter to valid numeric strings
-            let numStrs = valStrs.filter(v => /[-+]?\d*\.?\d+/.test(v));
+            // Map value strings to normalized numbers, mapping empty/emptyset indicators to '0'
+            let numStrs = valStrs.map(s => {
+                if (s.includes('\u2205') || s.includes('Ø') || s.includes('ø') || s.trim() === '') {
+                    return '0';
+                }
+                let normalized = s.replace(/[\u2212-]/g, '-');
+                let m = normalized.match(/[-+]?\d*\.?\d+[KkMmBb]?/);
+                return m ? m[0] : '0';
+            });
             
-            // If no explicit value containers, parse text stripped of title parentheses parameters
-            let num = numStrs.length > 0 ? numStrs[0] : null;
+            // Pick first non-zero value from extracted numStrs.
+            // CVD (and similar) legends prefix the actual value with a "0 Main chart symbol..." line
+            // which causes numStrs[0] to be "0"; .find() skips it to reach the real value.
+            let num = numStrs.find(s => s !== '0') || null;
             if (!num) {
                 // Strip title parameters like (14, close, SMA, 14, 2) before regex matching
                 let cleanedTxt = txt.replace(/\([^)]*\)/g, '');
                 let match = cleanedTxt.match(/[-+]?[0-9]*\.?[0-9]+(?:[eE][-+]?[0-9]+)?[KMBkmb%]?/g);
                 if (match && match.length > 0) {
-                    num = match[0].trim();
+                    // Prefer the last non-"0" token so that a leading "0 Main chart..." subtitle
+                    // does not shadow the real indicator value that follows it.
+                    let preferred = match.slice().reverse().find(m => m !== '0');
+                    num = (preferred || match[match.length - 1]).trim();
                 }
             }
             
             if (upper.includes('RSI') && num) res.rsi = num;
             if (upper.includes('CVD') && upper.includes('SPOT') && num) res.spot_cvd = num;
             if (upper.includes('CVD') && !upper.includes('SPOT') && num) res.futures_cvd = num;
-            if ((upper.includes('OI') || upper.includes('OPEN INTEREST')) && num) res.open_interest = num;
+            if ((upper.includes('OPEN INTEREST') || /\bOI\b/.test(upper)) && num) res.open_interest = num;
             if ((upper.includes('FUNDING') || upper.includes('FUND')) && num) res.funding_rate = num;
             if ((upper.includes('LONG/SHORT') || upper.includes('LSR') || upper.includes('RATIO')) && num) res.ls_ratio = num;
             
@@ -110,11 +141,28 @@ SINGLE_FRAME_EXTRACTION_JS = r"""
                     res.liquidations_long = numStrs[0];
                 }
             }
+
+            if (upper.includes('WHALE') && numStrs.length > 0) {
+                res.whale_index = numStrs[0];
+            }
+            if (upper.includes('TAKER') && numStrs.length >= 2) {
+                res.taker_buy_count = numStrs[0];
+                res.taker_sell_count = numStrs[1];
+            }
+            if ((upper.includes('BID & ASK') || (upper.includes('BID') && upper.includes('ASK'))) && numStrs.length >= 2) {
+                if (upper.includes('COINS')) {
+                    res.coins_bid = numStrs[0];
+                    res.coins_ask = numStrs[1];
+                } else if (upper.includes('DOLLARS')) {
+                    res.dollars_bid = numStrs[0];
+                    res.dollars_ask = numStrs[1];
+                }
+            }
         });
         
         // Fallback for close from price line
         if (!res.close) {
-            let priceEl = document.querySelector('.pane-legend-value, [class*="lastValue"]');
+            let priceEl = document.querySelector('.pane-legend-value, [class*="lastValue"], [class*="valueValue-"]');
             if (priceEl) res.close = getTxt(priceEl);
         }
         
@@ -132,6 +180,9 @@ def parse_float(val: Any, default: float = 0.0) -> float:
         return float(val)
     try:
         clean_str = str(val).replace(',', '').replace('$', '').replace('%', '').strip()
+        clean_str = clean_str.replace('\u2212', '-').replace('\u2013', '-')
+        if clean_str == '\u2205' or clean_str == '':
+            return 0.0
         if clean_str.endswith('K') or clean_str.endswith('k'):
             return float(clean_str[:-1]) * 1_000
         if clean_str.endswith('M') or clean_str.endswith('m'):
@@ -371,23 +422,25 @@ class CoinglassTab:
                                          let bidAsks = existing.filter(s => s.name && s.name.includes('Bid & Ask'));
                                          
                                          let injectedAny = false;
-                                         if (!hasVolume) {{ ac.createStudy('Volume', false, false); injectedAny = true; }}
-                                         if (!hasFutCVD) {{ ac.createStudy('<CoinGlass> Aggregated Futures Cumulative Volume Delta (CVD)', false, false); injectedAny = true; }}
-                                         if (!hasSpotCVD) {{ ac.createStudy('<CoinGlass> Aggregated Spot Cumulative Volume Delta (CVD)', false, false); injectedAny = true; }}
-                                         if (!hasRSI) {{ ac.createStudy('Relative Strength Index', false, false); injectedAny = true; }}
-                                         if (!hasFunding) {{ ac.createStudy('<CoinGlass> Funding Rates(Open Interest Weighted,Candles)', false, false); injectedAny = true; }}
-                                         if (!hasLiq) {{ ac.createStudy('<CoinGlass> Aggregated Liquidations ', false, false); injectedAny = true; }}
-                                         if (!hasLS) {{ ac.createStudy('<CoinGlass> Long/Short Ratio (Accounts)', false, false); injectedAny = true; }}
-                                         if (!hasOI) {{ ac.createStudy('<CoinGlass> Aggregated Open Interest(STABLECOIN-margined,Candles)', false, false); injectedAny = true; }}
-                                         if (!hasWhale) {{ ac.createStudy('<CoinGlass> Whale Index', false, false); injectedAny = true; }}
-                                         if (!hasTaker) {{ ac.createStudy('<CoinGlass> Taker Buy/Sell Count', false, false); injectedAny = true; }}
+                                         if (!hasVolume) {{ let p = ac.createStudy('Volume', false, false); if (p instanceof Promise) await p; injectedAny = true; }}
+                                         if (!hasFutCVD) {{ let p = ac.createStudy('<CoinGlass> Aggregated Futures Cumulative Volume Delta (CVD)', false, false); if (p instanceof Promise) await p; injectedAny = true; }}
+                                         if (!hasSpotCVD) {{ let p = ac.createStudy('<CoinGlass> Aggregated Spot Cumulative Volume Delta (CVD)', false, false); if (p instanceof Promise) await p; injectedAny = true; }}
+                                         if (!hasRSI) {{ let p = ac.createStudy('Relative Strength Index', false, false); if (p instanceof Promise) await p; injectedAny = true; }}
+                                         if (!hasFunding) {{ let p = ac.createStudy('<CoinGlass> Funding Rates(Open Interest Weighted,Candles)', false, false); if (p instanceof Promise) await p; injectedAny = true; }}
+                                         if (!hasLiq) {{ let p = ac.createStudy('<CoinGlass> Aggregated Liquidations ', false, false); if (p instanceof Promise) await p; injectedAny = true; }}
+                                         if (!hasLS) {{ let p = ac.createStudy('<CoinGlass> Long/Short Ratio (Accounts)', false, false); if (p instanceof Promise) await p; injectedAny = true; }}
+                                         if (!hasOI) {{ let p = ac.createStudy('<CoinGlass> Aggregated Open Interest(STABLECOIN-margined,Candles)', false, false); if (p instanceof Promise) await p; injectedAny = true; }}
+                                         if (!hasWhale) {{ let p = ac.createStudy('<CoinGlass> Whale Index', false, false); if (p instanceof Promise) await p; injectedAny = true; }}
+                                         if (!hasTaker) {{ let p = ac.createStudy('<CoinGlass> Taker Buy/Sell Count', false, false); if (p instanceof Promise) await p; injectedAny = true; }}
                                          
                                          if (bidAsks.length < 2) {{
                                              for (let b of bidAsks) {{
                                                  try {{ ac.removeStudy(b.id); }} catch(e) {{}}
                                              }}
-                                             ac.createStudy('<CoinGlass> Aggregated Futures Bid & Ask ', false, false, {{ "Depth": 1, "symbol": "Main chart symbol", "Measure": "Coins" }});
-                                             ac.createStudy('<CoinGlass> Aggregated Futures Bid & Ask ', false, false, {{ "Depth": 1, "symbol": "Main chart symbol", "Measure": "Dollars" }});
+                                             let p1 = ac.createStudy('<CoinGlass> Aggregated Futures Bid & Ask ', false, false, {{ "Depth": 1, "symbol": "Main chart symbol", "Measure": "Coins" }});
+                                             if (p1 instanceof Promise) await p1;
+                                             let p2 = ac.createStudy('<CoinGlass> Aggregated Futures Bid & Ask ', false, false, {{ "Depth": 1, "symbol": "Main chart symbol", "Measure": "Dollars" }});
+                                             if (p2 instanceof Promise) await p2;
                                              injectedAny = true;
                                          }}
                                          
@@ -457,9 +510,18 @@ class CoinglassTab:
                         if res and res.get("success"):
                             d = res["data"]
                             sym_actual = (d.get("symbol") or "").strip().upper()
-                            # Check actual extracted symbol matches what we expect
-                            if sym_actual and sym_actual in self.symbols:
-                                target_sym = sym_actual
+                            # Verify actual extracted symbol matches the expected symbol for this window
+                            if sym_actual:
+                                clean_actual = sym_actual.split('.')[0].split(':')[0].replace("PERP", "").strip().upper()
+                                clean_expected = sym.split('.')[0].split(':')[0].replace("PERP", "").strip().upper()
+                                if clean_actual != clean_expected and clean_actual in [s.split('.')[0].split(':')[0].replace("PERP", "").strip().upper() for s in self.symbols]:
+                                    # It's a valid symbol in this tab but in a different window (might happen during layout load/sync)
+                                    target_sym = next(s for s in self.symbols if s.split('.')[0].split(':')[0].replace("PERP", "").strip().upper() == clean_actual)
+                                elif clean_actual != clean_expected:
+                                    log.debug(f"[{self.tab_id}] Symbol mismatch for window {win_idx}: expected {sym}, got {sym_actual}. Skipping frame update to prevent contamination.")
+                                    return False
+                                else:
+                                    target_sym = sym
                             else:
                                 target_sym = sym
                                 
@@ -476,17 +538,17 @@ class CoinglassTab:
                                 fut_cvd=parse_float(d.get("futures_cvd", 0.0)),
                                 spot_cvd=parse_float(d.get("spot_cvd", 0.0)),
                                 funding=parse_float(d.get("funding_rate", 0.0)),
-                                liq_long=parse_float(d.get("liquidations_long", 0.0)),
-                                liq_short=parse_float(d.get("liquidations_short", 0.0)),
+                                liq_long=abs(parse_float(d.get("liquidations_long", 0.0))),
+                                liq_short=abs(parse_float(d.get("liquidations_short", 0.0))),
                                 ls_ratio=parse_float(d.get("ls_ratio", 0.0)),
                                 oi=parse_float(d.get("open_interest", 0.0)),
-                                coins_bid=parse_float(d.get("coins_bid", 0.0)),
-                                coins_ask=parse_float(d.get("coins_ask", 0.0)),
-                                dollars_bid=parse_float(d.get("dollars_bid", 0.0)),
-                                dollars_ask=parse_float(d.get("dollars_ask", 0.0)),
+                                coins_bid=abs(parse_float(d.get("coins_bid", 0.0))),
+                                coins_ask=abs(parse_float(d.get("coins_ask", 0.0))),
+                                dollars_bid=abs(parse_float(d.get("dollars_bid", 0.0))),
+                                dollars_ask=abs(parse_float(d.get("dollars_ask", 0.0))),
                                 whale_idx=parse_float(d.get("whale_index", 0.0)),
-                                tk_buy_cnt=parse_float(d.get("taker_buy_count", 0.0)),
-                                tk_sell_cnt=parse_float(d.get("taker_sell_count", 0.0))
+                                tk_buy_cnt=abs(parse_float(d.get("taker_buy_count", 0.0))),
+                                tk_sell_cnt=abs(parse_float(d.get("taker_sell_count", 0.0)))
                             )
                             return True
             return False
@@ -569,8 +631,8 @@ class CoinglassTab:
             for row in data:
                 sym = row.get("symbol")
                 if sym in self.symbols:
-                    long_liq = parse_float(row.get("longLiq", 0.0))
-                    short_liq = parse_float(row.get("shortLiq", 0.0))
+                    long_liq = abs(parse_float(row.get("longLiq", 0.0)))
+                    short_liq = abs(parse_float(row.get("shortLiq", 0.0)))
                     await self.store.update(sym, source="coinglass", liq_long=long_liq, liq_short=short_liq)
 
     async def seed_symbol(self, symbol: str, excel_executor, focus_lock: asyncio.Lock) -> None:
@@ -815,13 +877,13 @@ class CoinglassTab:
                     "liq_short":  abs(parse_float(d.get("liquidations_short", 0.0))),
                     "ls_ratio":   parse_float(d.get("ls_ratio",           1.0)),
                     "oi":         parse_float(d.get("open_interest",      0.0)),
-                    "coins_bid":  parse_float(d.get("coins_bid", 0.0)),
-                    "coins_ask":  parse_float(d.get("coins_ask", 0.0)),
-                    "dollars_bid": parse_float(d.get("dollars_bid", 0.0)),
-                    "dollars_ask": parse_float(d.get("dollars_ask", 0.0)),
+                    "coins_bid":  abs(parse_float(d.get("coins_bid", 0.0))),
+                    "coins_ask":  abs(parse_float(d.get("coins_ask", 0.0))),
+                    "dollars_bid": abs(parse_float(d.get("dollars_bid", 0.0))),
+                    "dollars_ask": abs(parse_float(d.get("dollars_ask", 0.0))),
                     "whale_idx":  parse_float(d.get("whale_index", 0.0)),
-                    "tk_buy_cnt": parse_float(d.get("taker_buy_count", 0.0)),
-                    "tk_sell_cnt": parse_float(d.get("taker_sell_count", 0.0)),
+                    "tk_buy_cnt": abs(parse_float(d.get("taker_buy_count", 0.0))),
+                    "tk_sell_cnt": abs(parse_float(d.get("taker_sell_count", 0.0))),
                 }
                 
                 candles.appendleft(candle_data)
@@ -1430,102 +1492,111 @@ async def main(skip_seed: bool = False) -> None:
     store = SnapshotStore(ALL_SYMBOLS, predictor, liquidation_predictor, trade_tracker, trend_pull_predictor)
     stop = asyncio.Event()
     
-    log.info("[Setup] Launching Chromium instance with persistent profile...")
+    log.info("[Setup] Launching separate Chromium instances/contexts with persistent profiles...")
     async with async_playwright() as pw:
-        user_data_dir = os.path.join(os.getcwd(), "chrome_profile")
-        ctx = await pw.chromium.launch_persistent_context(
-            user_data_dir,
-            headless=False,
-            viewport={"width": 1920, "height": 1080},
-            args=[
-                "--disable-features=CalculateNativeWinOcclusion",
-                "--disable-background-timer-throttling",
-                "--start-maximized",
-                "--remote-debugging-port=9222"
-            ]
-        )
-        
-        # 1. Performing Session Login first
-        log.info("[Setup] Navigating to Coinglass Login...")
-        login_page = await ctx.new_page()
-        
-        for attempt in range(3):
-            try:
-                await login_page.goto("https://www.coinglass.com/login", wait_until="load", timeout=45000)
-                break
-            except Exception as exc:
-                log.info(f"[Setup] [WARN] Login navigation attempt {attempt+1} failed: {exc}")
-                if attempt == 2:
-                    raise exc
-                await asyncio.sleep(5.0)
-        await asyncio.sleep(5)
-        
-        os.makedirs(os.path.join(base_dir, "Seeding"), exist_ok=True)
-        await login_page.screenshot(path=os.path.join(base_dir, "Seeding", "login_init.png"))
-        
-        email_input = login_page.locator("input[placeholder='Email']").first
-        if await email_input.count() > 0:
+        user_data_dir_1 = os.path.join(os.getcwd(), "chrome_profile_tab1")
+        user_data_dir_2 = os.path.join(os.getcwd(), "chrome_profile_tab2")
+
+        async def launch_and_login(user_data_dir, port, context_name):
+            log.info(f"[Setup] Launching Chromium persistent context for {context_name}...")
+            ctx = await pw.chromium.launch_persistent_context(
+                user_data_dir,
+                headless=False,
+                viewport={"width": 1920, "height": 1080},
+                args=[
+                    "--disable-features=CalculateNativeWinOcclusion",
+                    "--disable-background-timer-throttling",
+                    "--start-maximized",
+                    f"--remote-debugging-port={port}"
+                ]
+            )
+            
+            # Perform login check / execution
+            log.info(f"[Setup] [{context_name}] Checking/performing session login...")
+            
             email = os.environ.get("COINGLASS_EMAIL")
             password = os.environ.get("COINGLASS_PASSWORD")
-            if not email or not password:
-                raise ValueError("Missing COINGLASS_EMAIL or COINGLASS_PASSWORD environment variables.")
             
-            await email_input.click()
-            await email_input.fill(email)
-            await asyncio.sleep(0.3)
+            if context_name == "TAB_2" or not email or not password:
+                log.info(f"[Setup] [{context_name}] Running in Guest mode to avoid sync conflict. Skipping login page.")
+                return ctx
 
-            pass_input = login_page.locator("input[placeholder='Password']").first
-            await pass_input.click()
-            await pass_input.fill(password)
-            await asyncio.sleep(0.3)
-
-            await login_page.screenshot(path=os.path.join(base_dir, "Seeding", "login_filled.png"))
-            log.info("[Setup] Submitting login form...")
-
-            # Try explicit button click first, fallback to JS click, last resort Enter key
+            login_page = await ctx.new_page()
             try:
-                btn = login_page.locator("button:has-text('Login')").first
-                if await btn.count() > 0:
-                    await btn.wait_for(state="visible", timeout=5000)
-                    await btn.click()
+                for attempt in range(3):
+                    try:
+                        await login_page.goto("https://www.coinglass.com/login", wait_until="load", timeout=45000)
+                        break
+                    except Exception as exc:
+                        log.info(f"[Setup] [{context_name}] [WARN] Login navigation attempt {attempt+1} failed: {exc}")
+                        if attempt == 2:
+                            raise exc
+                        await asyncio.sleep(5.0)
+                await asyncio.sleep(5)
+                
+                os.makedirs(os.path.join(base_dir, "Seeding"), exist_ok=True)
+                await login_page.screenshot(path=os.path.join(base_dir, "Seeding", f"login_{context_name}_init.png"))
+                
+                email_input = login_page.locator("input[placeholder='Email']").first
+                if await email_input.count() > 0:
+                    await email_input.click()
+                    await email_input.fill(email)
+                    await asyncio.sleep(0.3)
+
+                    pass_input = login_page.locator("input[placeholder='Password']").first
+                    await pass_input.click()
+                    await pass_input.fill(password)
+                    await asyncio.sleep(0.3)
+
+                    await login_page.screenshot(path=os.path.join(base_dir, "Seeding", f"login_{context_name}_filled.png"))
+                    log.info(f"[Setup] [{context_name}] Submitting login form...")
+
+                    try:
+                        btn = login_page.locator("button:has-text('Login')").first
+                        if await btn.count() > 0:
+                            await btn.wait_for(state="visible", timeout=5000)
+                            await btn.click()
+                        else:
+                            raise Exception("button not found via locator")
+                    except Exception:
+                        try:
+                            await login_page.evaluate('''() => {
+                                const b = Array.from(document.querySelectorAll('button'))
+                                    .find(el => el.textContent.trim() === 'Login');
+                                if (b) b.click();
+                            }''')
+                        except Exception:
+                            await pass_input.press("Enter")
+
+                    log.info(f"[Setup] [{context_name}] Waiting for post-login redirect...")
+                    try:
+                        await login_page.wait_for_url(lambda url: "/login" not in url, timeout=20000)
+                        log.info(f"[Setup] [{context_name}] Login successful — redirected away from /login.")
+                    except Exception:
+                        log.info(f"[Setup] [{context_name}] [WARN] No redirect detected — may already be logged in or login failed.")
+                    await login_page.screenshot(path=os.path.join(base_dir, "Seeding", f"login_{context_name}_after_submit.png"))
+                    log.info(f"[Setup] [{context_name}] Waiting 5 seconds to ensure session cookies are fully persisted...")
+                    await asyncio.sleep(5.0)
                 else:
-                    raise Exception("button not found via locator")
-            except Exception:
+                    log.info(f"[Setup] [{context_name}] Form inputs not detected, assuming session already active.")
+            finally:
                 try:
-                    await login_page.evaluate('''() => {
-                        const b = Array.from(document.querySelectorAll('button'))
-                            .find(el => el.textContent.trim() === 'Login');
-                        if (b) b.click();
-                    }''')
+                    await login_page.close()
                 except Exception:
-                    # Most reliable: press Enter on password field
-                    await pass_input.press("Enter")
+                    pass
+            return ctx
 
-            log.info("[Setup] Waiting for post-login redirect...")
-            try:
-                await login_page.wait_for_url(lambda url: "/login" not in url, timeout=20000)
-                log.info("[Setup] Login successful — redirected away from /login.")
-            except Exception:
-                log.info("[Setup] [WARN] No redirect detected — may already be logged in or login failed.")
-            await login_page.screenshot(path=os.path.join(base_dir, "Seeding", "login_after_submit.png"))
-            log.info("[Setup] Waiting 5 seconds to ensure session cookies are fully persisted...")
-            await asyncio.sleep(5.0)
-        else:
-            log.info("[Setup] Form inputs not detected, assuming session already active.")
-        
-        # 2. Open Scraping Tabs (while login page is open to hold session cache)
-        tab1 = CoinglassTab(ctx, TAB1_SYMBOLS, store, "TAB_1")
-        tab2 = CoinglassTab(ctx, TAB2_SYMBOLS, store, "TAB_2")
+        # Sequentially initialize contexts to avoid visual/profiling race conditions
+        ctx1 = await launch_and_login(user_data_dir_1, 9222, "TAB_1")
+        ctx2 = await launch_and_login(user_data_dir_2, 9223, "TAB_2")
+
+        # 2. Open Scraping Tabs
+        tab1 = CoinglassTab(ctx1, TAB1_SYMBOLS, store, "TAB_1")
+        tab2 = CoinglassTab(ctx2, TAB2_SYMBOLS, store, "TAB_2")
         binance = BinanceFootprintFeed(ALL_SYMBOLS, store)
         binance_ws = BinanceTradePriceWebSocketFeed(ALL_SYMBOLS, store)
         
         await asyncio.gather(tab1.start(), tab2.start())
-        
-        # Close login page now that layout tabs have initialized
-        try:
-            await login_page.close()
-        except Exception:
-            pass
         
         # 3. Configure grid symbols & indicators
         focus_lock = asyncio.Lock()
@@ -1656,7 +1727,7 @@ async def main(skip_seed: bool = False) -> None:
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             excel_pool.shutdown(wait=True)
-            await ctx.close()
+            await asyncio.gather(ctx1.close(), ctx2.close(), return_exceptions=True)
         
     log.info("[Exit] Shutdown complete.")
 

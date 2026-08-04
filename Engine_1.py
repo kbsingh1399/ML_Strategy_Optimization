@@ -838,8 +838,9 @@ def render_table(snap: Dict[str, AssetSnapshot], trade_tracker=None):
         from rich.text import Text
 
         t = Table(title="Engine_1 — 6-Strategy ML Trading Terminal", expand=True)
-        cols = ("Symbol", "Price", "RSI", "FutCVD", "LiqL", "LiqS",
-                "Fund", "LSR", "OI", "FP_Δ", "FP_POC", "ARM")
+        cols = ("Symbol", "Price", "RSI", "FutCVD", "SpotCVD", "LiqL", "LiqS",
+                "Fund", "LSR", "OI", "CoinsB", "CoinsA", "USDB", "USDA",
+                "Whale", "BuyC", "SellC", "FP_Δ", "FP_POC", "ARM")
         for col in cols:
             t.add_column(col, justify="center", no_wrap=True)
 
@@ -861,11 +862,19 @@ def render_table(snap: Dict[str, AssetSnapshot], trade_tracker=None):
                 fmt(a.price, fresh),
                 fmt(a.rsi, fresh),
                 fmt(a.fut_cvd, fresh),
+                fmt(a.spot_cvd, fresh),
                 fmt(a.liq_long, fresh),
                 fmt(a.liq_short, fresh),
                 fmt(a.funding, fresh, is_funding=True),
                 fmt(a.ls_ratio, fresh),
                 fmt(a.oi, fresh),
+                fmt(a.coins_bid, fresh),
+                fmt(a.coins_ask, fresh),
+                fmt(a.dollars_bid, fresh),
+                fmt(a.dollars_ask, fresh),
+                fmt(a.whale_idx, fresh),
+                fmt(a.tk_buy_cnt, fresh),
+                fmt(a.tk_sell_cnt, fresh),
                 fmt(a.fp_delta, fresh),
                 fmt(a.fp_poc, fresh),
                 f"[green]{a.strategy_armed}[/green]" if a.strategy_armed else "[dim]--[/dim]"
@@ -985,7 +994,7 @@ async def seed_all_symbols(predictor, symbols: list, data_dir: Path, store: Snap
                             volume=vol_val,
                             rsi=rsi_val,
                             fut_cvd=cvd_val,
-                            spot_cvd=cvd_val,
+                            spot_cvd=0.0,
                             oi=oi_val,
                             funding=fund_val,
                             ls_ratio=ls_val,
@@ -1400,7 +1409,7 @@ def run_backtest(symbol: str, data_dir: Path = None):
             errors="coerce"
         )
         dc = [c for c in df_f.columns if c in
-              ["Symbol", "POC Price", "Candle #", "Timestamp", "TimeStamp", "time", "Is POC"]]
+              ["Symbol", "POC Price", "Candle #", "Timestamp", "TimeStamp", "time", "Is POC", "Volume"]]
         if dc:
             df_f = df_f.drop(columns=dc, errors="ignore")
         df = pd.merge_asof(df.sort_values("ts"), df_f.sort_values("ts"),
