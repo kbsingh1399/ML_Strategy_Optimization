@@ -444,11 +444,9 @@ class CoinglassTab:
                                              injectedAny = true;
                                          }}
                                          
-                                         // Force save layout if anything was injected
-                                         if (injectedAny && tradingViewApi._saveChartService && typeof tradingViewApi._saveChartService.saveChart === 'function') {{
-                                             try {{
-                                                 tradingViewApi._saveChartService.saveChart();
-                                             }} catch(se) {{}}
+                                         // Disable autosave to prevent cross-tab cloud layout overwrites
+                                         if (tradingViewApi._saveChartService) {{
+                                             try {{ tradingViewApi._saveChartService._autoSaveEnabled = false; }} catch(se) {{}}
                                          }}
                                          
                                          let dump = ac.getAllStudies().map(s => ({{id: s.id, name: s.name}}));
@@ -518,7 +516,15 @@ class CoinglassTab:
                                     # It's a valid symbol in this tab but in a different window (might happen during layout load/sync)
                                     target_sym = next(s for s in self.symbols if s.split('.')[0].split(':')[0].replace("PERP", "").strip().upper() == clean_actual)
                                 elif clean_actual != clean_expected:
-                                    log.debug(f"[{self.tab_id}] Symbol mismatch for window {win_idx}: expected {sym}, got {sym_actual}. Skipping frame update to prevent contamination.")
+                                    log.debug(f"[{self.tab_id}] Symbol mismatch for window {win_idx}: expected {sym}, got {sym_actual}. Auto-repairing symbol...")
+                                    try:
+                                        await frame.evaluate(f'''() => {{
+                                            if (typeof tradingViewApi !== 'undefined' && tradingViewApi.changeSymbol) {{
+                                                tradingViewApi.changeSymbol("Binance_{sym}");
+                                            }}
+                                        }}''')
+                                    except Exception:
+                                        pass
                                     return False
                                 else:
                                     target_sym = sym
