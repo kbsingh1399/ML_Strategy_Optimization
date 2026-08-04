@@ -1,9 +1,0 @@
-{
-    "timestamp": 1784207255.5947473,
-    "files": {
-        "lgb_model.pkl": "0b9375dd4993cc5a027d25e5b18b8f68b2644495722484fba86e9443efbc865c",
-        "xgb_model.pkl": "d774edba658e33c82a42bef40d3e51d3495cae8adf745aae17c7479013da109b",
-        "cb_model.pkl": "a4a99aba8057941f3f9fb5ff412e467ba3ad064fbbe0266eaf8e1305298d3c6b",
-        "features.pkl": "675f67b5d3af96fa875921651a9ae637b8cd5ed2fa4409b97123febedb667a1d"
-    }
-}

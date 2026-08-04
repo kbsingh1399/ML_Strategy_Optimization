@@ -25,7 +25,7 @@ except ImportError:
 class MT5ExecutionBridge:
     def __init__(self, account_id: Optional[int] = None, password: Optional[str] = None, 
                  server: Optional[str] = None, max_daily_loss_pct: float = 3.0, 
-                 initial_balance: float = 5000.0, risk_per_trade_usd: float = 50.0):
+                 initial_balance: float = 5000.0, risk_per_trade_usd: float = 20.0):
         self.account_id = account_id
         self.password = password
         self.server = server
@@ -182,11 +182,11 @@ if __name__ == "__main__":
     print(f"MT5 Bridge Test (Dry-Run: {dry_run})")
     if dry_run:
         print("Running dry-run calculation check...")
-        bridge = MT5ExecutionBridge(max_daily_loss_pct=3.0, initial_balance=5000.0, risk_per_trade_usd=50.0)
+        bridge = MT5ExecutionBridge(max_daily_loss_pct=3.0, initial_balance=5000.0, risk_per_trade_usd=20.0)
         lot = bridge.calculate_lot_size("BTCUSD.pi", 64000.0, 63000.0)
-        print(f"Calculated Lot Size for $50 Risk ($1,000 SL Dist): {lot} Lots")
+        print(f"Calculated Lot Size for $20 Risk ($1,000 SL Dist): {lot} Lots")
     else:
-        bridge = MT5ExecutionBridge(max_daily_loss_pct=3.0, initial_balance=5000.0, risk_per_trade_usd=50.0)
+        bridge = MT5ExecutionBridge(max_daily_loss_pct=3.0, initial_balance=5000.0, risk_per_trade_usd=20.0)
         bridge.initialize()
         sim_res = bridge.execute_order("BTCUSD", direction=1, sl_price=64000.0, tp_price=68000.0)
         print("Test Execution Result:", sim_res)
