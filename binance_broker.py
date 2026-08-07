@@ -288,6 +288,7 @@ class BinanceBroker:
             "closePosition": "true",
             "workingType": "MARK_PRICE",
             "priceProtect": "true",
+            "algoType": "CONDITIONAL",
         }
         res = self._request("POST", "/fapi/v1/algoOrder", params=params, signed=True)
         if res and ("algoId" in res or "clientAlgoId" in res):
