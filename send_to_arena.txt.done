@@ -1,0 +1,21 @@
+You are the Binance API Compliance Auditor. Please audit the file `binance_broker.py` in the repository:
+1. Under the new 2025/2026 Binance Futures Algo Order API spec, does `POST /fapi/v1/algoOrder` require `algoType='CONDITIONAL'` to be explicitly passed in the request body?
+2. If `algoType` is missing in `_place_algo_conditional` on lines 279-291:
+```python
+    def _place_algo_conditional(
+        self, symbol: str, side: str, order_type: str, trigger_price: float, label: str
+    ) -> Optional[dict]:
+        params = {
+            "symbol": symbol,
+            "side": side,
+            "type": order_type,
+            "stopPrice": str(trigger_price),
+            "closePosition": "true",
+            "workingType": "MARK_PRICE",
+            "priceProtect": "true",
+        }
+        res = self._request("POST", "/fapi/v1/algoOrder", params=params, signed=True)
+```
+Please provide the exact, corrected `_place_algo_conditional` function to include `"algoType": "CONDITIONAL"`.
+3. Verify if `priceProtect='true'` is correct, or should it be boolean `priceProtect=True` when serialized via `urllib.parse.urlencode()`.
+4. Provide the exact corrected code block to copy-paste into `binance_broker.py` to ensure all conditional algo orders are 100% compliant.
