@@ -349,12 +349,12 @@ class OrderFlowMicrostructureFilter:
             price_response_atr = abs(price_delta) / atr_val
             
             cvd_arr = np.array(self._cvd_history)
-            cvd_mu = np.mean(cvd_arr[:-1])
-            cvd_sigma = np.std(cvd_arr[:-1]) + 1e-10
-            
-            if len(cvd_arr) >= 2:
-                cvd_delta = cvd_arr[-1] - cvd_arr[-2]
-                cvd_delta_z = (cvd_delta - cvd_mu) / cvd_sigma
+            if len(cvd_arr) >= 3:
+                cvd_diffs = np.diff(cvd_arr)
+                diff_mu = np.mean(cvd_diffs[:-1])
+                diff_sigma = np.std(cvd_diffs[:-1]) + 1e-10
+                cvd_delta = cvd_diffs[-1]
+                cvd_delta_z = (cvd_delta - diff_mu) / diff_sigma
             else:
                 cvd_delta_z = 0.0
             

@@ -484,16 +484,18 @@ class BinanceBroker:
             return False
 
         # Place new TP order
-        self._place_algo_conditional(binance_symbol, opposite_side, "TAKE_PROFIT_MARKET", formatted_tp, "NEW_TP")
+        new_tp_res = self._place_algo_conditional(binance_symbol, opposite_side, "TAKE_PROFIT_MARKET", formatted_tp, "NEW_TP")
 
         # Now clean up old algo orders except the newly created ones
         new_sl_id = new_sl_res.get("algoId")
+        new_tp_id = new_tp_res.get("algoId") if new_tp_res else None
         try:
             open_algos = self._request("GET", "/fapi/v1/openAlgoOrders", params={"symbol": binance_symbol}, signed=True)
             if open_algos:
                 for algo in open_algos:
-                    if algo.get("algoId") != new_sl_id:
-                        self._request("DELETE", "/fapi/v1/algoOrder", params={"symbol": binance_symbol, "algoId": algo["algoId"]}, signed=True)
+                    algo_id = algo.get("algoId")
+                    if algo_id not in (new_sl_id, new_tp_id):
+                        self._request("DELETE", "/fapi/v1/algoOrder", params={"symbol": binance_symbol, "algoId": algo_id}, signed=True)
         except Exception as e:
             log.warning(f"[Binance] Exception cleaning old algo orders during modify_sltp: {e}")
 

@@ -903,6 +903,13 @@ class EnsembleStrategyPredictor:
             # Compute features
             dff = featurize(df.copy(), btc_ref)
 
+            # Write computed 'atr' values back to history to enable dynamic ATR stop tightening
+            if "atr" in dff.columns:
+                atr_vals = dff["atr"].values
+                for idx, atr_v in enumerate(atr_vals):
+                    if idx < len(self.candles_history[symbol]):
+                        self.candles_history[symbol][idx]["atr"] = atr_v
+
             # GAP 5: Override computed RSI with Coinglass DOM RSI (matches OOS parquet)
             last_row = df.iloc[-1] if len(df) > 0 else None
             if last_row is not None and "__rsi_from_dom__" in last_row:
