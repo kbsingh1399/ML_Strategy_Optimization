@@ -35,7 +35,7 @@ os.makedirs(CACHE_DIR, exist_ok=True)
 
 SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "XRPUSDT", "SOLUSDT", "BNBUSDT", "DOGEUSDT", "ADAUSDT", "TRXUSDT", "LINKUSDT",
-    "AVAXUSDT", "SUIUSDT", "NEARUSDT", "DOTUSDT", "LTCUSDT", "XAUUSDT", "XAGUSDT", "CLUSDT", "NATGASUSDT"
+    "AVAXUSDT", "SUIUSDT", "NEARUSDT", "DOTUSDT", "LTCUSDT"
 ]
 
 RISK_PER_TRADE = 50.0
@@ -384,10 +384,13 @@ def prep_vwap(df: pd.DataFrame, btc_ref: pd.DataFrame = None):
 # -------------------------------------------------------------------------
 # DATA LOADING FUNCTION
 # -------------------------------------------------------------------------
+_GDRIVE_PARQUET = r"G:\My Drive\_Trading_Data\15m\parquet"
+_LOCAL_PARQUET   = os.path.join(BASE_DIR, "backtesting_data")
+
 def load_asset(symbol: str) -> pd.DataFrame:
     search_dirs = [
-        r"G:\My Drive\_Trading_Data\15m\parquet",
-        os.path.join(BASE_DIR, "backtesting_data"),
+        _GDRIVE_PARQUET,
+        _LOCAL_PARQUET,
         os.path.join(BASE_DIR, "Seeding"),
         BASE_DIR
     ]
@@ -1156,7 +1159,6 @@ def train_all_strategies():
     ]
     prob_thresholds = [0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8]
 
-    print("\n[2.5/3] Pre-computing DataFrames for Optuna (Speed Optimization)...")
     precomputed_dfs = {}
     for (tp, trail), strats in all_combos.items():
         precomputed_dfs[(tp, trail)] = {}
@@ -1164,11 +1166,16 @@ def train_all_strategies():
             precomputed_dfs[(tp, trail)][s_name] = {}
             if raw_trades:
                 df = pd.DataFrame(raw_trades)
-                for sym_key in SYMBOLS:
-                    precomputed_dfs[(tp, trail)][s_name][sym_key] = df[df['symbol'] == sym_key]
+                if 'symbol' in df.columns:
+                    for sym_key in SYMBOLS:
+                        precomputed_dfs[(tp, trail)][s_name][sym_key] = df[df['symbol'] == sym_key]
+                else:
+                    for sym_key in SYMBOLS:
+                        precomputed_dfs[(tp, trail)][s_name][sym_key] = pd.DataFrame()
             else:
                 for sym_key in SYMBOLS:
                     precomputed_dfs[(tp, trail)][s_name][sym_key] = pd.DataFrame()
+
 
     for strat_name, strat_space in strategy_spaces.items():
         print(f"\n--- Strategy: {strat_name} ---")
@@ -1217,14 +1224,14 @@ def train_all_strategies():
                     elif strat_name == "S5_Microstructure":
                         filt_df = sym_df[
                             (sym_df.get('vol_regime', 0) <= s_param['t_vol']) & (
-                                ((sym_df['direction'] == 1) & (sym_df.get('delta_qty_z', 0) >= s_param['t_delta'])) |
-                                ((sym_df['direction'] == -1) & (sym_df.get('delta_qty_z', 0) <= -s_param['t_delta']))
+                                ((sym_df['direction'] == 1) & (sym_df.get('z_delta_qty', 0) >= s_param['t_delta'])) |
+                                ((sym_df['direction'] == -1) & (sym_df.get('z_delta_qty', 0) <= -s_param['t_delta']))
                             )
                         ]
                     elif strat_name == "S6_SMC_Orderflow":
                         filt_df = sym_df[
-                            ((sym_df['direction'] == 1) & (sym_df.get('z_delta', 0) >= s_param['t_delta'])) |
-                            ((sym_df['direction'] == -1) & (sym_df.get('z_delta', 0) <= -s_param['t_delta']))
+                            ((sym_df['direction'] == 1) & (sym_df.get('stoch_k', 50) < s_param['t_stoch']) & (sym_df.get('cvd_delta', 0) > s_param['t_cvd_d'])) |
+                            ((sym_df['direction'] == -1) & (sym_df.get('stoch_k', 50) > 100 - s_param['t_stoch']) & (sym_df.get('cvd_delta', 0) < -s_param['t_cvd_d']))
                         ]
                     else:
                         filt_df = pd.DataFrame()
@@ -1323,8 +1330,9 @@ def train_all_strategies():
                     print(f"  [OPTUNA OK] {strat_name} / {sym}: tp={best_tp}, trail={best_trail}, prob>={best_prob}")
             
             raw_trades = all_combos[(best_tp, best_trail)][strat_name]
+            if not raw_trades: continue
             df_t = pd.DataFrame(raw_trades)
-            if df_t.empty: continue
+            if df_t.empty or 'symbol' not in df_t.columns: continue
             sym_df = df_t[df_t['symbol'] == sym]
             if len(sym_df) < 10: continue
             
@@ -1350,8 +1358,8 @@ def train_all_strategies():
                 ]
             elif strat_name == "S5_Microstructure":
                 filt_df = sym_df[
-                    ((sym_df['direction'] == 1) & (sym_df.get('z_delta_qty', 0) >= best_s_params['t_zdelta']) & (sym_df.get('z_bid_qty', 0) > sym_df.get('z_ask_qty', 0))) |
-                    ((sym_df['direction'] == -1) & (sym_df.get('z_delta_qty', 0) <= -best_s_params['t_zdelta']) & (sym_df.get('z_ask_qty', 0) > sym_df.get('z_bid_qty', 0)))
+                    ((sym_df['direction'] == 1) & (sym_df.get('z_delta_qty', 0) >= best_s_params['t_delta']) & (sym_df.get('z_bid_qty', 0) > sym_df.get('z_ask_qty', 0))) |
+                    ((sym_df['direction'] == -1) & (sym_df.get('z_delta_qty', 0) <= -best_s_params['t_delta']) & (sym_df.get('z_ask_qty', 0) > sym_df.get('z_bid_qty', 0)))
                 ]
             elif strat_name == "S6_SMC_Orderflow":
                 filt_df = sym_df[

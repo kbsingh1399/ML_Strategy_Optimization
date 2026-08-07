@@ -2,8 +2,9 @@ import polars as pl
 import numpy as np
 import os
 
-local_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backtesting_data"))
-DEFAULT_DIR = local_dir if os.path.exists(local_dir) else r"G:\My Drive\_Trading_Data\15m\parquet"
+_GDRIVE_PARQUET = r"G:\My Drive\_Trading_Data\15m\parquet"
+_LOCAL_PARQUET  = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backtesting_data"))
+DEFAULT_DIR = _GDRIVE_PARQUET if os.path.exists(_GDRIVE_PARQUET) else _LOCAL_PARQUET
 
 def load_and_merge_data(symbol: str, data_dir: str = DEFAULT_DIR) -> pl.DataFrame:
     """Loads and merges Summary and Footprint Parquet files for a given symbol."""

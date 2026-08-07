@@ -28,8 +28,9 @@ sys.path.insert(0, _CORE_DIR)
 from unified_backtest import load_asset, prep, NUM_LEAVES, MAX_BARS
 from fast_optuna import build_labels_fast
 
-local_backtest_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backtesting_data"))
-DATA_DIR = local_backtest_dir if os.path.exists(local_backtest_dir) else r'G:\My Drive\_Trading_Data\15m\parquet'
+_GDRIVE_PARQUET   = r"G:\My Drive\_Trading_Data\15m\parquet"
+_LOCAL_PARQUET    = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backtesting_data"))
+DATA_DIR = _GDRIVE_PARQUET if os.path.exists(_GDRIVE_PARQUET) else _LOCAL_PARQUET
 MODEL_DIR = os.path.join(_DIR, "models")
 os.makedirs(MODEL_DIR, exist_ok=True)
 

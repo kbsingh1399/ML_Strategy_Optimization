@@ -20,8 +20,9 @@ spec.loader.exec_module(compiled_module)
 globals().update(compiled_module.__dict__)
 
 # Apply directory path override to point to the correct Google Drive folder
-local_backtest_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backtesting_data"))
-PQ_DIR = local_backtest_dir if os.path.exists(local_backtest_dir) else r"G:\My Drive\_Trading_Data\15m\parquet"
+_GDRIVE_PARQUET   = r"G:\My Drive\_Trading_Data\15m\parquet"
+_LOCAL_PARQUET    = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backtesting_data"))
+PQ_DIR = _GDRIVE_PARQUET if os.path.exists(_GDRIVE_PARQUET) else _LOCAL_PARQUET
 compiled_module.PQ_DIR = PQ_DIR
 
 # --- CUSTOM REPLACEMENT LOADER & FEATURE ENGINEERING OVERRIDES ---
@@ -46,14 +47,14 @@ def custom_load_asset(symbol):
     
     # Clean and parse TimeStamp column to ts_key
     ts_col_s = 'TimeStamp' if 'TimeStamp' in df_s.columns else 'Timestamp'
-    df_s['ts_key'] = pd.to_datetime(df_s[ts_col_s].astype(str).str.replace(' IST', '', regex=False), errors='coerce')
+    df_s['ts_key'] = pd.to_datetime(df_s[ts_col_s], utc=True, errors='coerce').dt.tz_localize(None)
     
     if os.path.exists(footprint_path):
         df_f = pd.read_parquet(footprint_path)
         
         # Clean and parse Timestamp column in footprint to ts_key
         ts_col_f = 'TimeStamp' if 'TimeStamp' in df_f.columns else 'Timestamp'
-        df_f['ts_key'] = pd.to_datetime(df_f[ts_col_f].astype(str).str.replace(' IST', '', regex=False), errors='coerce')
+        df_f['ts_key'] = pd.to_datetime(df_f[ts_col_f], utc=True, errors='coerce').dt.tz_localize(None)
         
         # Drop overlapping columns to prevent suffix duplication
         cols_to_drop = [c for c in ['Symbol', 'POC Price', 'Candle #', 'Timestamp', 'TimeStamp', 'time'] if c in df_f.columns]
