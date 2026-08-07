@@ -242,6 +242,30 @@ def featurize(df: pd.DataFrame, btc_ref: Optional[pd.DataFrame] = None) -> pd.Da
     # Volume ratio (5-period vs 20-period MA)
     df["vr5"] = df["Volume"] / (df["Volume"].rolling(20, min_periods=1).mean() + 1e-10)
 
+    # ── CVD Divergence: price-CVD micro-divergence ──────────────────
+    if "CVD" in df.columns:
+        ph  = df["High"].rolling(20, min_periods=5).max()
+        pl  = df["Low"].rolling(20, min_periods=5).min()
+        cvh = df["CVD"].rolling(20, min_periods=5).max()
+        cvl = df["CVD"].rolling(20, min_periods=5).min()
+        df["cvd_div_bear"] = (
+            (df["High"] >= ph.shift(1) * 0.995) &
+            (df["CVD"] < cvh.shift(1) * 0.95)
+        ).astype(int)
+        df["cvd_div_bull"] = (
+            (df["Low"] <= pl.shift(1) * 1.005) &
+            (df["CVD"] > cvl.shift(1) * 1.05)
+        ).astype(int)
+        # Note: cvd_d is a column name or spot/fut delta series
+        cvd_d_col = "cvd_d" if "cvd_d" in df.columns else ("CVD" if "CVD" in df.columns else "")
+        df["cvd_accel"] = df[cvd_d_col].diff(3) if cvd_d_col else 0.0
+        df["cvd_absorb"] = (
+            ((df[cvd_d_col].fillna(0) > 0) & (df["Close"].diff(3).fillna(0) < 0)) if cvd_d_col else 0
+        ).astype(int)
+    else:
+        for c in ["cvd_div_bear", "cvd_div_bull", "cvd_accel", "cvd_absorb"]:
+            df[c] = 0
+
     # Clean up
     df = df.fillna(0).replace([np.inf, -np.inf], 0)
     return df
@@ -250,33 +274,59 @@ def featurize(df: pd.DataFrame, btc_ref: Optional[pd.DataFrame] = None) -> pd.Da
 # ─── HELPER FILTERS FOR SIGNAL REFINEMENT ─────────────────────────────────
 
 def _atr_scale(df: pd.DataFrame) -> np.ndarray:
-    """Per-bar ATR volatility multiplier in range [0.70, 1.40]."""
-    if "vr" not in df.columns:
+    """Symmetric +/-15% ATR threshold scaling, clamped to [0.85, 1.15].
+    Uses atr_ratio: current ATR / 100-period mean ATR.
+    """
+    if "atr" not in df.columns:
         return np.ones(len(df), dtype=np.float64)
-    return np.clip(1.0 - 0.35 * df["vr"].values, 0.70, 1.40)
+    atr_ma = df["atr"].rolling(100, min_periods=10).mean().values + 1e-10
+    atr_ratio = df["atr"].values / atr_ma
+    bias = 1.0 + 0.50 * (atr_ratio - 1.0)
+    return np.clip(bias, 0.85, 1.15)
 
 
 def _is_chop(df: pd.DataFrame) -> np.ndarray:
+    """Chop detection: 2+ of 3 conditions must be met:
+    1. ATR compressed >=30% vs 20-bar-ago ATR mean
+    2. Average bar range narrower than 1.5x current ATR
+    3. Macro trend is weak (|mc| < 0.3)
     """
-    Chop detection: ATR contracting AND price oscillating near EMA21.
-    Returns boolean array — True where choppy regime suppresses entries.
-    """
-    if "atr" not in df.columns or "e21" not in df.columns:
-        return np.zeros(len(df), dtype=bool)
-    atr_mean = df["atr"].rolling(50, min_periods=10).mean() + 1e-10
-    atr_ratio = df["atr"] / atr_mean
-    dist_ema = abs(df["Close"] - df["e21"]) / (df["atr"] + 1e-10)
-    return (atr_ratio.values < 0.7) & (dist_ema.values < 0.5)
+    atr = df.get("atr", pd.Series(np.ones(len(df)), index=df.index)).values
+    high = df.get("High", pd.Series(np.ones(len(df)), index=df.index)).values
+    low  = df.get("Low", pd.Series(np.ones(len(df)), index=df.index)).values
+    mc   = df.get("mc", pd.Series(np.zeros(len(df)), index=df.index)).values
+
+    # Condition 1: ATR compressed vs 20-bar-ago rolling mean
+    atr_ma20 = pd.Series(atr).rolling(20, min_periods=5).mean().shift(20).fillna(
+        pd.Series(atr).rolling(20, min_periods=5).mean()).values
+    atr_compress = (atr < atr_ma20 * 0.70)
+
+    # Condition 2: narrow range
+    range_mean = pd.Series(high - low).rolling(10, min_periods=3).mean().values
+    range_narrow = (range_mean / (atr + 1e-10)) < 1.5
+
+    # Condition 3: weak macro
+    weak_macro = (np.abs(mc) < 0.3)
+
+    return (atr_compress.astype(int) + range_narrow.astype(int) +
+            weak_macro.astype(int)) >= 2
 
 
 def _cvd_ok(df: pd.DataFrame, direction: int) -> np.ndarray:
-    """
-    CVD confluence check: 5-bar CVD delta must point in trade direction.
+    """CVD confluence: 5-bar delta must agree with direction,
+    AND no bearish divergence for longs / no bullish for shorts.
     """
     if "CVD" not in df.columns:
         return np.ones(len(df), dtype=bool)
+
     cvd_d5 = df["CVD"].diff(5).fillna(0).values
-    return (cvd_d5 > 0) if direction == 1 else (cvd_d5 < 0)
+    cvdb = df.get("cvd_div_bear", pd.Series(0, index=df.index)).values
+    cvdu = df.get("cvd_div_bull", pd.Series(0, index=df.index)).values
+
+    if direction == 1:
+        return (cvd_d5 > 0) & (cvdb == 0)
+    else:
+        return (cvd_d5 < 0) & (cvdu == 0)
 
 
 def _atr_scale_threshold(base: float, atr_scale: np.ndarray) -> np.ndarray:
@@ -416,23 +466,21 @@ def signal_s6(df: pd.DataFrame) -> np.ndarray:
 
 
 def signal_s7(df: pd.DataFrame) -> np.ndarray:
-    """S7: CVD-Price Divergence — high-conviction microstructure signal."""
+    """S7: CVD-Price Divergence — vectorized directional alpha."""
     out = np.zeros(len(df), dtype=np.int32)
-    if "CVD" not in df.columns or "Close" not in df.columns:
-        return out
-    cvd = df["CVD"].ffill().values
-    close = df["Close"].values
-    atr_safe = df.get("atr", pd.Series(np.ones(len(df)))).values + 1e-10
-    n = len(out)
-    for i in range(5, n):
-        p5 = (close[i] - close[i - 5]) / atr_safe[i]
-        c5 = cvd[i] - cvd[i - 5]
-        cvd_rng = np.abs(np.diff(cvd[max(0, i - 20):i + 1])).mean() + 1e-10
-        cn = c5 / max(cvd_rng * 3.0, 1e-10)
-        if p5 < -0.5 and cn > 0.4:
-            out[i] = 1   # absorption → bullish
-        if p5 > 0.5 and cn < -0.4:
-            out[i] = -1  # distribution → bearish
+    mc   = df.get("mc", pd.Series(0, index=df.index)).values
+    cvdb = df.get("cvd_div_bear", pd.Series(0, index=df.index)).values
+    cvdu = df.get("cvd_div_bull", pd.Series(0, index=df.index)).values
+    cv_acc = df.get("cvd_accel", pd.Series(0, index=df.index)).values
+    chop = _is_chop(df)
+
+    # Bullish: macro uptrend + bullish CVD div + CVD accelerating up + not choppy
+    mask_l = (mc > 0) & (cvdu > 0) & (cv_acc > 0) & (~chop) & (cvdb == 0)
+    # Bearish: macro downtrend + bearish CVD div + CVD accelerating down + not choppy
+    mask_s = (mc < 0) & (cvdb > 0) & (cv_acc < 0) & (~chop) & (cvdu == 0)
+
+    out[mask_l] = 1
+    out[mask_s] = -1
     return out
 
 

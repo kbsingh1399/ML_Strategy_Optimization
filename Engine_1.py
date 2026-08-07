@@ -138,6 +138,7 @@ class AssetSnapshot:
     price: float = 0.0
     volume: float = 0.0
     rsi: float = 0.0
+    atr: float = 0.0
     fut_cvd: float = 0.0
     spot_cvd: float = 0.0
     liq_long: float = 0.0
@@ -162,7 +163,7 @@ class AssetSnapshot:
     def __post_init__(self):
         """Ensure all numeric fields are floats."""
         float_fields = {
-            'price', 'volume', 'rsi', 'fut_cvd', 'spot_cvd',
+            'price', 'volume', 'rsi', 'atr', 'fut_cvd', 'spot_cvd',
             'liq_long', 'liq_short', 'funding', 'ls_ratio', 'oi',
             'fp_delta', 'fp_poc', 'coins_bid', 'coins_ask',
             'dollars_bid', 'dollars_ask', 'whale_idx', 'tk_buy_cnt', 'tk_sell_cnt'
@@ -368,10 +369,13 @@ class SnapshotStore:
             new_snap = dataclasses.replace(
                 cur, seq=self._seq, ts_ns=time.time_ns(), **clean_patch)
 
-            # Run exit checks
+            # Run exit checks — propagate latest ATR from predictor
             if self.trade_tracker and "price" in clean_patch:
-                cur_atr = getattr(new_snap, 'atr', 0.0)
-                self.trade_tracker.check_exits(symbol, new_snap.price, current_atr=cur_atr)
+                cur_atr = 0.0
+                if self.predictor and hasattr(self.predictor, 'latest_atr'):
+                    cur_atr = self.predictor.latest_atr.get(symbol, 0.0)
+                self.trade_tracker.check_exits(
+                    symbol, new_snap.price, current_atr=cur_atr)
                 self.trade_tracker.update_live_pnl(symbol, new_snap.price)
 
             self._data[symbol] = new_snap
@@ -618,6 +622,20 @@ class Engine1TradeTracker:
                 for t in trades:
                     if not t.get('exit_price') and t.get('trade_id'):
                         self.active_trades[t['trade_id']] = t.copy()
+
+                # Restore anti-martingale counter from recent losses
+                recent_losses = 0
+                for t in reversed(self.history):
+                    if t.get('pnl_usd', 0.0) < 0:
+                        recent_losses += 1
+                    else:
+                        break
+                if recent_losses > 0:
+                    self.consecutive_losses = recent_losses
+                    log.info(
+                        f"[History] Restored consecutive-loss counter: "
+                        f"{self.consecutive_losses} from saved trades"
+                    )
             except Exception as e:
                 log.error(f"Failed to load trade history: {e}")
 
@@ -1044,7 +1062,7 @@ class Engine1TradeTracker:
                                 sl = ns
                                 broker_modify_jobs.append((trade.get('symbol'), ns, trade['tp']))
 
-                # Dynamic ATR stop tightening
+                # Dynamic ATR stop tightening / widening
                 # ───────────────────────────────────────────────────────
                 # When current volatility (current_atr) exceeds entry
                 # volatility (entry_atr) by >30 %, the market is in a
@@ -1068,6 +1086,31 @@ class Engine1TradeTracker:
                         f"(ratio={current_atr/entry_atr:.2f}) → "
                         f"SL tightened from {old_sl:.4f} to {sl:.4f}"
                     )
+
+                # ── ATR widening when volatility compresses ──────
+                # If vol drops below 60% of entry ATR, price noise is
+                # reduced → the original stop may be too loose, but we
+                # leave it alone.  However, if the SL was PREVIOUSLY
+                # tightened and vol now compresses, restore 85% of
+                # original distance to avoid premature stop-outs.
+                if (entry_atr > 0 and current_atr > 0 and
+                        current_atr < entry_atr * 0.60):
+                    orig_sl_dist = trade.get('sl_dist', abs(entry_price - sl))
+                    cur_sl_dist = abs(entry_price - trade['sl'])
+                    # Only widen if stop was previously tightened
+                    if cur_sl_dist < orig_sl_dist * 0.95:
+                        restore_dist = max(orig_sl_dist * 0.85,
+                                           entry_price * 0.003)
+                        if direction == 1:
+                            trade['sl'] = entry_price - restore_dist
+                        else:
+                            trade['sl'] = entry_price + restore_dist
+                        sl = trade['sl']
+                        log.debug(
+                            f"[ATR-Widen] {trade['trade_id']}: "
+                            f"vol compressed below 60% → SL widened "
+                            f"to {sl:.4f}"
+                        )
 
                 # Timeout exit (24 hours)
                 elapsed = time.time() - trade.get('entry_timestamp', time.time())

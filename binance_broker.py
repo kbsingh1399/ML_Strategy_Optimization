@@ -21,6 +21,9 @@ log = logging.getLogger("BinanceBroker")
 BASE_DIR = Path(__file__).resolve().parent
 ENV_FILE = BASE_DIR / ".env"
 
+TAKER_FEE = float(os.environ.get("BINANCE_TAKER_FEE", "0.0004"))    # 0.040 %
+MAKER_FEE = float(os.environ.get("BINANCE_MAKER_FEE", "-0.0002"))   # -0.020 % rebate (maker rebate is negative)
+
 
 def _load_env():
     if ENV_FILE.exists():
@@ -66,6 +69,13 @@ class BinanceBroker:
         self.valid_perpetuals: set = set()
         self.active_orders: Dict[str, dict] = {}
         self.time_offset = 0
+
+        # Fee Optimization Tuning parameters
+        self.post_only_timeout_secs: float = 3.0
+        self.min_profit_notional: float = 0.50
+        self.split_notional_thresh: float = 5000.0
+        self.max_slices: int = 3
+        self.inter_slice_delay_secs: float = 1.0
 
         log.info(
             f"BinanceBroker initialized (dry_run={self.dry_run}, "
@@ -297,6 +307,113 @@ class BinanceBroker:
             log.warning(f"[Binance] {label} response: {res} — Engine_1 check_exits will manage fallback.")
         return res
 
+    def place_entry_limit_post_only(self, symbol: str, side: str,
+                                     quantity: float, price: float) -> Optional[dict]:
+        """Post-only LIMIT order (timeInForce=GTX) to earn maker rebate."""
+        qty = self._format_qty(symbol, quantity)
+        pr = self._format_price(symbol, price)
+        if self.dry_run:
+            order_id = int(time.time() * 1000) % 10_000_000
+            log.info(f"[DRY-RUN] LIMIT+GTX {side} {symbol} qty={qty:.4f} "
+                     f"@ {pr:.4f} (maker rebate: {MAKER_FEE*100:+.3f}%)")
+            return {"orderId": order_id, "symbol": symbol, "side": side,
+                    "type": "LIMIT", "origQty": str(qty), "status": "FILLED",
+                    "avgPrice": str(pr), "timeInForce": "GTX"}
+
+        params = {
+            'symbol': symbol,
+            'side': side.upper(),
+            'type': 'LIMIT',
+            'timeInForce': 'GTX',
+            'quantity': qty,
+            'price': pr,
+            'newOrderRespType': 'RESULT',
+        }
+        result = self._request('POST', '/fapi/v1/order', params=params, signed=True)
+        if not result or result.get('error'):
+            log.warning(f"[Binance] LIMIT+GTX {side} {symbol} @ {pr:.4f}: {result}")
+            return None
+        log.info(f"[Binance] LIMIT+GTX {side} {symbol} "
+                 f"orderId={result.get('orderId')} status={result.get('status')} "
+                 f"(maker rebate: {MAKER_FEE*100:+.3f}%)")
+        return result
+
+    def _check_order_filled(self, symbol: str, order_id: int) -> bool:
+        """Check if a limit order has filled. GET /fapi/v1/order"""
+        if self.dry_run:
+            return True
+        params = {'symbol': symbol, 'orderId': order_id}
+        result = self._request('GET', '/fapi/v1/order', params=params, signed=True)
+        return result.get('status') == 'FILLED' if result and not result.get('error') else False
+
+    def _cancel_limit_order(self, symbol: str, order_id: int) -> bool:
+        """Cancel an unfilled limit order. DELETE /fapi/v1/order"""
+        if self.dry_run:
+            return True
+        params = {'symbol': symbol, 'orderId': order_id}
+        result = self._request('DELETE', '/fapi/v1/order', params=params, signed=True)
+        return bool(result and not result.get('error'))
+
+    def _validate_profit_threshold(self, symbol: str, entry_price: float,
+                                    tp: float, sl: float, quantity: float,
+                                    direction: int) -> Tuple[bool, str]:
+        """Reject trades where expected net PnL < 2x round-trip fees."""
+        notional = quantity * entry_price
+        total_fee = notional * abs(TAKER_FEE) * 2
+
+        slippage_bps = 5.0 if symbol in {"NATGASUSDT","CLUSDT","XAGUSDT","XAUUSDT"} else 2.0
+        est_slippage = notional * slippage_bps / 10000.0
+        min_cost = total_fee + est_slippage
+
+        tp_dist = abs(tp - entry_price)
+        if tp_dist <= 0:
+            return False, f"Invalid TP distance: {tp_dist:.6f}"
+
+        gross_profit = quantity * tp_dist
+        net_profit = gross_profit - min_cost
+
+        if net_profit < self.min_profit_notional:
+            return False, (
+                f"Profit gate: net=${net_profit:.4f} < min=${self.min_profit_notional:.2f} "
+                f"(gross=${gross_profit:.4f} fee=${total_fee:.4f} slip=${est_slippage:.4f})"
+            )
+
+        sl_dist = abs(entry_price - sl)
+        if sl_dist <= 0:
+            return False, f"Invalid SL distance: {sl_dist:.6f}"
+
+        max_loss = quantity * sl_dist + min_cost
+        rr_after_fees = net_profit / max_loss if max_loss > 0 else 0
+        if rr_after_fees < 0.5:
+            return False, f"Profit gate: R:R after fees={rr_after_fees:.2f} < 0.5"
+
+        return True, "ok"
+
+    def _slice_quantity(self, symbol: str, quantity: float,
+                         entry_price: float) -> List[float]:
+        """Split large orders (notional >= $5K) into <=3 equal slices."""
+        notional = quantity * entry_price
+        if notional < self.split_notional_thresh or self.max_slices <= 1:
+            return [quantity]
+
+        rules = self.symbol_rules.get(symbol, {"step_size": 0.001, "min_qty": 0.001})
+        step_size = rules.get("step_size", 0.001)
+
+        n_slices = min(self.max_slices, max(2, int(notional / 2500)))
+        slice_qty = round(quantity / n_slices / step_size) * step_size
+
+        if slice_qty < step_size:
+            return [quantity]
+
+        slices = [slice_qty] * (n_slices - 1)
+        remainder = quantity - sum(slices)
+        if remainder > 0:
+            slices.append(round(remainder / step_size) * step_size)
+
+        log.info(f"[Binance] Slicing {symbol} qty={quantity:.4f} "
+                 f"(notional=${notional:,.0f}) -> {len(slices)} slices")
+        return slices
+
     def execute_trade(
         self,
         binance_symbol: str,
@@ -307,7 +424,7 @@ class BinanceBroker:
         strategy: str,
         risk_capital: float,
     ) -> Optional[dict]:
-        """Execute market order on Binance Futures with attached SL and TP."""
+        """Execute trade on Binance Futures with Maker-Only GTX limits & order slicing."""
         stop_dist = abs(bin_entry - bin_sl)
         if stop_dist <= 0 or bin_entry <= 0:
             return None
@@ -316,43 +433,24 @@ class BinanceBroker:
             log.error(f"[Binance] {binance_symbol} is not a valid active perpetual. Rejecting trade.")
             return None
 
-        raw_qty = risk_capital / stop_dist
-        qty = self._format_qty(binance_symbol, raw_qty)
+        qty = self._format_qty(binance_symbol, risk_capital / stop_dist)
         entry_price = self._format_price(binance_symbol, bin_entry)
         sl_price = self._format_price(binance_symbol, bin_sl)
         tp_price = self._format_price(binance_symbol, bin_tp)
 
-        side = "BUY" if direction == 1 else "SELL"
-        opposite_side = "SELL" if direction == 1 else "BUY"
-
-        MIN_NOTIONAL = 5.0
-        if qty * bin_entry < MIN_NOTIONAL:
-            log.warning(
-                f"[Binance] Skipping {side} {binance_symbol}: notional "
-                f"${qty * bin_entry:.2f} < ${MIN_NOTIONAL} minimum."
-            )
+        # ── GATE 1: Profit Threshold ────────────────────────────
+        passes, reason = self._validate_profit_threshold(
+            binance_symbol, entry_price, tp_price, sl_price, qty, direction)
+        if not passes:
+            log.warning(f"[Binance] Trade REJECTED — {reason}")
             return None
 
-        client_order_id = f"E1_{strategy}_{int(time.time_ns() % 1_000_000_000)}"
+        # ── GATE 2: Slicing ───────────────────────────────────────
+        slices = self._slice_quantity(binance_symbol, qty, entry_price)
+        n_slices = len(slices)
 
-        if self.dry_run:
-            pseudo_ticket = int(time.time_ns() % 1_000_000_000)
-            log.info(
-                f"[BINANCE DRY RUN] [{strategy}] {side} {qty} {binance_symbol} @ {entry_price:.4f} "
-                f"SL={sl_price:.4f} TP={tp_price:.4f} (ticket={pseudo_ticket})"
-            )
-            return {
-                "symbol": binance_symbol,
-                "order_id": pseudo_ticket,
-                "entry_price": entry_price,
-                "sl_price": sl_price,
-                "tp_price": tp_price,
-                "lot": qty,
-                "basis_pct": 0.0,
-                "is_pending": False,
-            }
-
-        log.info(f"[BINANCE LIVE] Dispatching {side} {qty} {binance_symbol} @ Market...")
+        side = "BUY" if direction == 1 else "SELL"
+        opposite_side = "SELL" if direction == 1 else "BUY"
 
         # GAP 4: Latency Guard Pre-Check
         try:
@@ -367,41 +465,87 @@ class BinanceBroker:
         except Exception as e:
             log.warning(f"[Binance] Latency guard check failed, proceeding anyway: {e}")
 
-        order_params = {
-            "symbol": binance_symbol,
-            "side": side,
-            "type": "MARKET",
-            "quantity": qty,
-            "newClientOrderId": client_order_id,
-        }
-        res = self._request("POST", "/fapi/v1/order", params=order_params, signed=True)
-        if not res or "orderId" not in res:
-            log.error(f"[BINANCE LIVE REJECT] Failed to place market entry for {binance_symbol}")
+        entry_result = None
+        total_filled_qty = 0.0
+        all_order_ids = []
+
+        # Calculate limit price with 1 tick offset to increase GTX fill probability
+        rules = self.symbol_rules.get(binance_symbol, {"tick_size": 0.01})
+        tick_size = rules.get("tick_size", 0.01)
+        limit_price = self._format_price(binance_symbol,
+            entry_price - tick_size if direction == 1 else entry_price + tick_size)
+
+        for slice_idx, slice_qty in enumerate(slices):
+            if slice_idx > 0:
+                self._backoff_sleep(self.inter_slice_delay_secs)
+
+            if n_slices == 1 or slice_idx == 0:
+                limit_result = self.place_entry_limit_post_only(
+                    binance_symbol, side, slice_qty, limit_price)
+                if limit_result and not limit_result.get('error'):
+                    order_id = limit_result.get('orderId')
+                    if order_id:
+                        t0 = time.time()
+                        filled = False
+                        while time.time() - t0 < self.post_only_timeout_secs:
+                            self._backoff_sleep(0.3)
+                            if self._check_order_filled(binance_symbol, order_id):
+                                filled = True
+                                break
+                        if filled:
+                            entry_result = limit_result
+                            total_filled_qty += slice_qty
+                            all_order_ids.append(order_id)
+                            log.info(f"[Binance] LIMIT+GTX filled slice {slice_idx+1}/{n_slices} (maker rebate: {MAKER_FEE*100:+.3f}%)")
+                            continue
+                        else:
+                            self._cancel_limit_order(binance_symbol, order_id)
+
+                # Fallback to MARKET
+                mkt_params = {
+                    "symbol": binance_symbol,
+                    "side": side,
+                    "type": "MARKET",
+                    "quantity": self._format_qty(binance_symbol, slice_qty),
+                    "newClientOrderId": f"E1_{strategy}_{int(time.time_ns() % 1_000_000_000)}"
+                }
+                mkt_result = self._request("POST", "/fapi/v1/order", params=mkt_params, signed=True)
+                if not mkt_result or "orderId" not in mkt_result:
+                    log.error(f"[Binance] Fallback MARKET order failed for slice {slice_idx+1}")
+                    if total_filled_qty <= 0:
+                        return None
+                    break
+                entry_result = mkt_result
+                all_order_ids.append(int(mkt_result["orderId"]))
+            else:
+                mkt_params = {
+                    "symbol": binance_symbol,
+                    "side": side,
+                    "type": "MARKET",
+                    "quantity": self._format_qty(binance_symbol, slice_qty),
+                    "newClientOrderId": f"E1_{strategy}_{int(time.time_ns() % 1_000_000_000)}"
+                }
+                mkt_result = self._request("POST", "/fapi/v1/order", params=mkt_params, signed=True)
+                if mkt_result and "orderId" in mkt_result:
+                    all_order_ids.append(int(mkt_result["orderId"]))
+                else:
+                    log.error(f"[Binance] Market execution failed for slice {slice_idx+1}")
+
+            total_filled_qty += slice_qty
+
+        if total_filled_qty <= 0:
             return None
 
-        # GAP 7 FIX: Fill Verification
-        status = res.get("status", "")
-        executed_qty = float(res.get("executedQty", 0.0))
-        if status in ("REJECTED", "EXPIRED", "CANCELED") or (status == "NEW" and executed_qty == 0.0):
-            # Double check fill status by querying order endpoint if NEW
-            query_res = self._request("GET", "/fapi/v1/order", params={"symbol": binance_symbol, "orderId": res["orderId"]}, signed=True)
-            if query_res:
-                status = query_res.get("status", status)
-                executed_qty = float(query_res.get("executedQty", executed_qty))
-                res["avgPrice"] = query_res.get("avgPrice", res.get("avgPrice", 0.0))
-                res["cumQuote"] = query_res.get("cumQuote", res.get("cumQuote", 0.0))
+        # Determine average execution price
+        avg_price = entry_price
+        if entry_result:
+            cum_quote = float(entry_result.get("cumQuote", 0.0))
+            exec_qty = float(entry_result.get("executedQty", 0.0))
+            avg_price = (cum_quote / exec_qty) if exec_qty > 0 and cum_quote > 0 else float(entry_result.get("avgPrice", entry_price))
+            if avg_price == 0.0:
+                avg_price = entry_price
 
-        if status not in ("FILLED", "PARTIALLY_FILLED") and executed_qty == 0.0:
-            log.error(f"[BINANCE UNVERIFIED FILL] Order {res.get('orderId')} status={status}, executedQty={executed_qty}. Aborting trade.")
-            return None
-
-        order_id = int(res["orderId"])
-        cum_quote = float(res.get("cumQuote", 0.0))
-        avg_price = (cum_quote / executed_qty) if executed_qty > 0 and cum_quote > 0 else float(res.get("avgPrice", entry_price))
-        if avg_price == 0.0:
-            avg_price = entry_price
-
-        # GAP 2: Dollar-distance SL/TP locking
+        # Dollar-distance SL/TP locking
         sl_dist = abs(entry_price - sl_price)
         tp_dist = abs(tp_price - entry_price)
 
@@ -428,15 +572,15 @@ class BinanceBroker:
         except Exception as e:
             log.warning(f"[Binance] TP algo order exception: {e}")
 
-        log.info(f"[BINANCE LIVE SUCCESS] Fill: {binance_symbol} {side} {executed_qty} @ ${avg_price:,.2f} (orderId={order_id})")
+        log.info(f"[BINANCE LIVE SUCCESS] Fill: {binance_symbol} {side} {total_filled_qty} @ ${avg_price:,.2f} slices={n_slices}")
 
         return {
             "symbol": binance_symbol,
-            "order_id": order_id,
+            "order_id": all_order_ids[0] if all_order_ids else int(time.time()),
             "entry_price": avg_price,
             "sl_price": final_sl,
             "tp_price": final_tp,
-            "lot": executed_qty,
+            "lot": total_filled_qty,
             "basis_pct": 0.0,
             "is_pending": False,
         }
