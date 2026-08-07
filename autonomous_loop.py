@@ -37,7 +37,7 @@ os.makedirs(SHOTS_DIR, exist_ok=True)
 os.makedirs(TRACES_DIR, exist_ok=True)
 
 CDP_URL = "http://localhost:19022"
-GITHUB_REPO = "https://github.com/kbsingh1399/coinglass-trading"
+GITHUB_REPO = "https://github.com/kbsingh1399/ML_Strategy_Optimization"
 
 CORE_FILES = [
     "Engine_1.py", "binance_broker.py", "live_model_trainer.py",
@@ -168,7 +168,9 @@ def git_push(msg_label: str = "sync"):
             msg = f"Auto-sync [{msg_label}] @ {ts}"
             subprocess.run(["git", "commit", "-m", msg], cwd=BASE_DIR, capture_output=True, timeout=15)
             log(f"Committed: {msg}")
-        r = subprocess.run(["git", "push"], cwd=BASE_DIR, capture_output=True, timeout=30)
+        subprocess.run(["git", "push", "origin", "arena-seeding-fix"], cwd=BASE_DIR, capture_output=True, timeout=30)
+        r = subprocess.run(["git", "push", "ml_strat", "HEAD:main"], cwd=BASE_DIR, capture_output=True, timeout=30)
+        subprocess.run(["git", "push", "ml_strat", "HEAD:arena-seeding-fix"], cwd=BASE_DIR, capture_output=True, timeout=30)
         if r.returncode == 0:
             log(f"Git push OK — Live code updated at {GITHUB_REPO}")
     except Exception as e:
