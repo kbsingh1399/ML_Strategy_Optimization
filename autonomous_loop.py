@@ -629,7 +629,7 @@ async def run_unified_loop():
                     if generating or is_thinking:
                         stable_ticks = 0
                         log(f"Arena streaming/thinking... ({len(curr_text)} chars so far)")
-                    elif (len(curr_text) >= 2000 or has_full_patch) and copy_btn and len(curr_text) == last_len:
+                    elif copy_btn and len(curr_text) == last_len:
                         stable_ticks += 1
                         # If copy button is detected, settle faster (3 ticks instead of 6) to save tokens/time
                         target_ticks = 3 if copy_btn_captured else STABLE_TICKS_REQUIRED
@@ -649,10 +649,15 @@ async def run_unified_loop():
 
                     last_len = len(curr_text)
 
-                    # Completion gate: must have stable ticks AND (has_full_patch OR len >= 2000 OR 120s timeout)
+                    # Completion gate: must have stable ticks OR timeout fallback
                     target_ticks = 3 if copy_btn_captured else STABLE_TICKS_REQUIRED
-                    if stable_ticks >= target_ticks and (has_full_patch or len(curr_text) >= 2000 or (time.time() - start_wait) > 120):
+                    if stable_ticks >= target_ticks:
                         stable_text = curr_text
+                        break
+
+                    if (time.time() - start_wait) > 180:
+                        stable_text = curr_text
+                        log("Step 5 TIMEOUT: Wait time exceeded 180s. Forcing completion.")
                         break
 
                     await asyncio.sleep(sleep_interval)
