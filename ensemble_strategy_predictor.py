@@ -266,6 +266,36 @@ def featurize(df: pd.DataFrame, btc_ref: Optional[pd.DataFrame] = None) -> pd.Da
         for c in ["cvd_div_bear", "cvd_div_bull", "cvd_accel", "cvd_absorb"]:
             df[c] = 0
 
+    # ── CVD Imbalance Ratio (order-book conviction) ─────────────────
+    bid_col = "Bid Qty" if "Bid Qty" in df.columns else ("Bid USD" if "Bid USD" in df.columns else "")
+    ask_col = "Ask Qty" if "Ask Qty" in df.columns else ("Ask USD" if "Ask USD" in df.columns else "")
+
+    if bid_col and ask_col:
+        bq = df[bid_col].fillna(0)
+        aq = df[ask_col].fillna(0)
+        denom = bq + aq
+        df["cvd_imbalance"] = np.where(denom > 0, bq / denom, 0.50)
+        df["cvd_heavy_buy"]  = (df["cvd_imbalance"] > 0.65).astype(int)
+        df["cvd_heavy_sell"] = (df["cvd_imbalance"] < 0.35).astype(int)
+        imb_ma  = df["cvd_imbalance"].rolling(20, min_periods=5).mean()
+        imb_std = df["cvd_imbalance"].rolling(20, min_periods=5).std() + 1e-10
+        df["cvd_imb_z"] = (df["cvd_imbalance"] - imb_ma) / imb_std
+        df["cvd_imb_flat"] = (df["cvd_imb_z"].abs() < 0.5).astype(int)
+    else:
+        for c in ["cvd_imbalance", "cvd_heavy_buy", "cvd_heavy_sell", "cvd_imb_z", "cvd_imb_flat"]:
+            df[c] = 1 if "flat" in c else (0.50 if "imbalance" in c and "z" not in c else 0)
+
+    # ── Liquidation cascade flag ────────────────────────────────────
+    if "Agg. Liq Long" in df.columns:
+        liq_l   = pd.to_numeric(df["Agg. Liq Long"], errors="coerce").fillna(0)
+        liq_ma  = liq_l.rolling(100, min_periods=20).mean()
+        liq_std = liq_l.rolling(100, min_periods=20).std() + 1e-10
+        df["liq_cascade"] = (
+            (liq_l > liq_ma + 2.5 * liq_std) & (liq_ma > 0)
+        ).astype(int)
+    else:
+        df["liq_cascade"] = 0
+
     # Clean up
     df = df.fillna(0).replace([np.inf, -np.inf], 0)
     return df
@@ -347,6 +377,19 @@ def _oi_cvd_confluence(oi_rising: np.ndarray, cvd_d: np.ndarray) -> np.ndarray:
     return ~((oi_rising > 0) & (cvd_d < 0))
 
 
+def _cvd_imbalance_pass(heavy_buy: np.ndarray, heavy_sell: np.ndarray, imb_flat: np.ndarray, mc: np.ndarray) -> np.ndarray:
+    """CVD imbalance directional check.
+    True = order-book conviction agrees with macro direction.
+    Blocks: flat imbalance (no conviction), or heavy buys into shorts,
+            heavy sells into longs.
+    """
+    ok = np.ones(len(mc), dtype=bool)
+    ok = ok & (imb_flat == 0)                         # need conviction
+    ok = ok & ~((mc > 0) & (heavy_sell > 0))          # don't long into sells
+    ok = ok & ~((mc < 0) & (heavy_buy > 0))            # don't short into buys
+    return ok
+
+
 # ─── STRATEGY SIGNALS (S1-S7) ──────────────────────────────────────────────
 
 def signal_s1(df: pd.DataFrame) -> np.ndarray:
@@ -358,9 +401,13 @@ def signal_s1(df: pd.DataFrame) -> np.ndarray:
     lrs = df.get("liq_ratio_s", pd.Series(1, index=df.index)).values
     ar = _atr_scale(df)
     chop = _is_chop(df)
+    heavy_buy  = df.get("cvd_heavy_buy", pd.Series(0, index=df.index)).values
+    heavy_sell = df.get("cvd_heavy_sell", pd.Series(0, index=df.index)).values
+    imb_flat   = df.get("cvd_imb_flat", pd.Series(0, index=df.index)).values
+    imb_ok = _cvd_imbalance_pass(heavy_buy, heavy_sell, imb_flat, mc)
 
-    mask_l = (mc > 0) & (p8 < -0.15 * ar) & (lrl > 0.8) & (~chop) & _cvd_ok(df, 1)
-    mask_s = (mc < 0) & (p8 > 0.15 * ar) & (lrs > 0.8) & (~chop) & _cvd_ok(df, -1)
+    mask_l = (mc > 0) & (p8 < -0.15 * ar) & (lrl > 0.8) & (~chop) & _cvd_ok(df, 1) & imb_ok
+    mask_s = (mc < 0) & (p8 > 0.15 * ar) & (lrs > 0.8) & (~chop) & _cvd_ok(df, -1) & imb_ok
     out[mask_l] = 1; out[mask_s] = -1
     return out
 
@@ -372,13 +419,17 @@ def signal_s2(df: pd.DataFrame) -> np.ndarray:
     p8 = df.get("p8", pd.Series(0, index=df.index)).values
     ar = _atr_scale(df)
     chop = _is_chop(df)
+    heavy_buy  = df.get("cvd_heavy_buy", pd.Series(0, index=df.index)).values
+    heavy_sell = df.get("cvd_heavy_sell", pd.Series(0, index=df.index)).values
+    imb_flat   = df.get("cvd_imb_flat", pd.Series(0, index=df.index)).values
+    imb_ok = _cvd_imbalance_pass(heavy_buy, heavy_sell, imb_flat, mc)
 
     cvd_accel = np.zeros(len(df))
     if "CVD" in df.columns:
         cvd_accel = df["CVD"].diff().diff().fillna(0).values
 
-    mask_l = (mc > 0) & (p8 < -0.18 * ar) & (cvd_accel > 0) & (~chop) & _cvd_ok(df, 1)
-    mask_s = (mc < 0) & (p8 > 0.18 * ar) & (cvd_accel < 0) & (~chop) & _cvd_ok(df, -1)
+    mask_l = (mc > 0) & (p8 < -0.18 * ar) & (cvd_accel > 0) & (~chop) & _cvd_ok(df, 1) & imb_ok
+    mask_s = (mc < 0) & (p8 > 0.18 * ar) & (cvd_accel < 0) & (~chop) & _cvd_ok(df, -1) & imb_ok
     out[mask_l] = 1; out[mask_s] = -1
     return out
 
@@ -390,9 +441,13 @@ def signal_s3(df: pd.DataFrame) -> np.ndarray:
     p8 = df.get("p8", pd.Series(0, index=df.index)).values
     ar = _atr_scale(df)
     chop = _is_chop(df)
+    heavy_buy  = df.get("cvd_heavy_buy", pd.Series(0, index=df.index)).values
+    heavy_sell = df.get("cvd_heavy_sell", pd.Series(0, index=df.index)).values
+    imb_flat   = df.get("cvd_imb_flat", pd.Series(0, index=df.index)).values
+    imb_ok = _cvd_imbalance_pass(heavy_buy, heavy_sell, imb_flat, mc)
 
-    mask_l = (mc > 0) & (p8 < -0.22 * ar) & (~chop) & _cvd_ok(df, 1)
-    mask_s = (mc < 0) & (p8 > 0.22 * ar) & (~chop) & _cvd_ok(df, -1)
+    mask_l = (mc > 0) & (p8 < -0.22 * ar) & (~chop) & _cvd_ok(df, 1) & imb_ok
+    mask_s = (mc < 0) & (p8 > 0.22 * ar) & (~chop) & _cvd_ok(df, -1) & imb_ok
     out[mask_l] = 1; out[mask_s] = -1
     return out
 
@@ -405,11 +460,15 @@ def signal_s4(df: pd.DataFrame) -> np.ndarray:
     r = df.get("rsi", pd.Series(50, index=df.index)).values
     ar = _atr_scale(df)
     chop = _is_chop(df)
+    heavy_buy  = df.get("cvd_heavy_buy", pd.Series(0, index=df.index)).values
+    heavy_sell = df.get("cvd_heavy_sell", pd.Series(0, index=df.index)).values
+    imb_flat   = df.get("cvd_imb_flat", pd.Series(0, index=df.index)).values
+    imb_ok = _cvd_imbalance_pass(heavy_buy, heavy_sell, imb_flat, mc)
 
     rsi_lo = np.where(ar > 1.0, 35.0, 42.0)
     rsi_hi = np.where(ar > 1.0, 65.0, 58.0)
-    mask_l = (mc > 0) & (p8 < -0.15 * ar) & (r < rsi_lo) & (~chop) & _cvd_ok(df, 1)
-    mask_s = (mc < 0) & (p8 > 0.15 * ar) & (r > rsi_hi) & (~chop) & _cvd_ok(df, -1)
+    mask_l = (mc > 0) & (p8 < -0.15 * ar) & (r < rsi_lo) & (~chop) & _cvd_ok(df, 1) & imb_ok
+    mask_s = (mc < 0) & (p8 > 0.15 * ar) & (r > rsi_hi) & (~chop) & _cvd_ok(df, -1) & imb_ok
     out[mask_l] = 1; out[mask_s] = -1
     return out
 
@@ -422,16 +481,20 @@ def signal_s5(df: pd.DataFrame) -> np.ndarray:
     vr5 = df.get("vr5", pd.Series(1, index=df.index)).values
     ar = _atr_scale(df)
     chop = _is_chop(df)
+    heavy_buy  = df.get("cvd_heavy_buy", pd.Series(0, index=df.index)).values
+    heavy_sell = df.get("cvd_heavy_sell", pd.Series(0, index=df.index)).values
+    imb_flat   = df.get("cvd_imb_flat", pd.Series(0, index=df.index)).values
+    imb_ok = _cvd_imbalance_pass(heavy_buy, heavy_sell, imb_flat, mc)
 
     vr5_req = np.where(ar > 1.0, 1.10, 0.80)
-    mask_l = (mc > 0) & (p8 < -0.15 * ar) & (vr5 > vr5_req) & (~chop) & _cvd_ok(df, 1)
-    mask_s = (mc < 0) & (p8 > 0.15 * ar) & (vr5 > vr5_req) & (~chop) & _cvd_ok(df, -1)
+    mask_l = (mc > 0) & (p8 < -0.15 * ar) & (vr5 > vr5_req) & (~chop) & _cvd_ok(df, 1) & imb_ok
+    mask_s = (mc < 0) & (p8 > 0.15 * ar) & (vr5 > vr5_req) & (~chop) & _cvd_ok(df, -1) & imb_ok
     out[mask_l] = 1; out[mask_s] = -1
     return out
 
 
 def signal_s6(df: pd.DataFrame) -> np.ndarray:
-    """S6: OI Momentum — ATR + chop + CVD + OI-CVD confluence"""
+    """S6: OI Momentum — ATR + chop + CVD div + OI-CVD + imbalance"""
     out = np.zeros(len(df), dtype=np.int32)
     mc = df.get("mc", pd.Series(0, index=df.index)).values
     p8 = df.get("p8", pd.Series(0, index=df.index)).values
@@ -439,26 +502,34 @@ def signal_s6(df: pd.DataFrame) -> np.ndarray:
     cvd_d = df.get("cvd_d", pd.Series(0, index=df.index)).values
 
     atr_s = _atr_scale(df)
-    chop = _is_chop(df).astype(np.int32)
-    cvdb = df.get("cvd_div_bear", pd.Series(0, index=df.index)).values
-    cvdu = df.get("cvd_div_bull", pd.Series(0, index=df.index)).values
+    chop  = _is_chop(df).astype(np.int32)
+    cvdb  = df.get("cvd_div_bear", pd.Series(0, index=df.index)).values
+    cvdu  = df.get("cvd_div_bull", pd.Series(0, index=df.index)).values
+    heavy_buy  = df.get("cvd_heavy_buy", pd.Series(0, index=df.index)).values
+    heavy_sell = df.get("cvd_heavy_sell", pd.Series(0, index=df.index)).values
+    imb_flat   = df.get("cvd_imb_flat", pd.Series(0, index=df.index)).values
+    # CVD acceleration for trend leg quality check
+    cvd_acc = np.zeros(len(df))
+    if "CVD" in df.columns:
+        cvd_acc = df["CVD"].diff().diff().fillna(0).values
 
-    regime_ok = _regime_pass(chop, cvdb, cvdu)
-    oi_cvd_ok = _oi_cvd_confluence(oi_rising, cvd_d)
+    regime_ok   = _regime_pass(chop, cvdb, cvdu)
+    oi_cvd_ok   = _oi_cvd_confluence(oi_rising, cvd_d)
+    imb_ok      = _cvd_imbalance_pass(heavy_buy, heavy_sell, imb_flat, mc)
 
     th_trend = _atr_scale_threshold(0.18, atr_s)
     th_oi    = _atr_scale_threshold(0.12, atr_s)
 
-    # Trend leg: macro-aligned + p8 beyond dynamic threshold
-    trend_l = (mc > 0) & (p8 < -th_trend)
-    trend_s = (mc < 0) & (p8 >  th_trend)
+    # Trend leg: CVD accelerating in direction of trade
+    trend_l = (mc > 0) & (p8 < -th_trend) & (cvd_acc > 0)
+    trend_s = (mc < 0) & (p8 >  th_trend) & (cvd_acc < 0)
 
     # OI leg: looser threshold + OI rising + OI-CVD confluence
     oi_l = (mc > 0) & (p8 < -th_oi) & (oi_rising > 0) & oi_cvd_ok
     oi_s = (mc < 0) & (p8 >  th_oi) & (oi_rising > 0) & oi_cvd_ok
 
-    mask_l = (trend_l | oi_l) & regime_ok
-    mask_s = (trend_s | oi_s) & regime_ok
+    mask_l = (trend_l | oi_l) & regime_ok & imb_ok
+    mask_s = (trend_s | oi_s) & regime_ok & imb_ok
 
     out[mask_l] = 1
     out[mask_s] = -1
@@ -1025,6 +1096,26 @@ class EnsembleStrategyPredictor:
             # ─── TRADE ENTRY LOGIC ───────────────────────────────────
             if not self.ensemble.should_enter(direction, confidence, agreeing):
                 return
+
+            # ── Order-flow cascade pause: block shorts into liq spikes ──
+            if symbol in self.order_flow and direction == -1:
+                abs_sig = self.order_flow[symbol].get_absorption_signal()
+                if abs_sig.detected and abs_sig.signal_direction == 1:
+                    log.warning(
+                        f"[OrderFlow] SHORT blocked for {symbol}: "
+                        f"long-liq absorption detected "
+                        f"(score={abs_sig.absorption_score:.2f}, "
+                        f"liq_z={abs_sig.liq_spike_z:.2f})"
+                    )
+                    return
+                # Also check Coinglass liq_cascade feature
+                liq_cascade = int(dff['liq_cascade'].values[-1]) if 'liq_cascade' in dff.columns else 0
+                if liq_cascade and direction == -1:
+                    log.warning(
+                        f"[OrderFlow] SHORT blocked for {symbol}: "
+                        f"liq_cascade flag active (long liqs > 2.5σ)"
+                    )
+                    return
 
             if trade_tracker is None:
                 log.debug(f"[{symbol}] Signal but no trade_tracker: "

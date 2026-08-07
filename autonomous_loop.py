@@ -463,23 +463,35 @@ async def run_unified_loop():
         log(f"\n--- CYCLE {cycle}: {topic['title']} ---")
 
         # Step 2: Build prompt (check send_to_arena.txt override first)
+        try:
+            r = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=BASE_DIR)
+            commit_hash = r.stdout.strip() if r.returncode == 0 else "main"
+        except Exception:
+            commit_hash = "main"
+
+        check_header = (
+            f"IMPORTANT: Verify you have access to the latest code files. "
+            f"The latest commit pushed to the repository is `{commit_hash}`.\n"
+            f"If raw.githubusercontent.com URLs for `{commit_hash}` return a 404 due to CDN caching delays, "
+            f"please fetch directly from the `main` or `arena-seeding-fix` branch on GitHub, "
+            f"or retry querying the raw files after a few seconds. "
+            f"If you are still unable to push code or pull updates directly, "
+            f"please print your suggested code changes as exact markdown blocks starting with `# TARGET: <filename>` "
+            f"so they can be copied, verified, and implemented locally before pushing to continue the loop.\n\n"
+        )
+
         SEND_FILE = os.path.join(BASE_DIR, "send_to_arena.txt")
         if os.path.exists(SEND_FILE):
             try:
                 with open(SEND_FILE, "r", encoding="utf-8") as f:
                     custom_p = f.read().strip()
                 if custom_p:
-                    prompt_text = custom_p
+                    prompt_text = check_header + custom_p
                     log(f"Using dynamic prompt from send_to_arena.txt ({len(prompt_text)} chars)")
                 else:
-                    try:
-                        r = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=BASE_DIR)
-                        commit_hash = r.stdout.strip() if r.returncode == 0 else "main"
-                    except Exception:
-                        commit_hash = "main"
-
                     raw_base = f"https://raw.githubusercontent.com/kbsingh1399/ML_Strategy_Optimization/{commit_hash}"
                     prompt_text = (
+                        f"{check_header}"
                         f"## CONTEXT\n"
                         f"GitHub Repo: {GITHUB_REPO}\n"
                         f"Commit: `{commit_hash}`\n"
@@ -494,6 +506,7 @@ async def run_unified_loop():
                     )
             except Exception:
                 prompt_text = (
+                    f"{check_header}"
                     f"## CONTEXT\n"
                     f"GitHub Repo: {GITHUB_REPO}\n"
                     f"Branch: main\n"
@@ -502,14 +515,9 @@ async def run_unified_loop():
                     f"{topic['prompt']}"
                 )
         else:
-            try:
-                r = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=BASE_DIR)
-                commit_hash = r.stdout.strip() if r.returncode == 0 else "main"
-            except Exception:
-                commit_hash = "main"
-
             raw_base = f"https://raw.githubusercontent.com/kbsingh1399/ML_Strategy_Optimization/{commit_hash}"
             prompt_text = (
+                f"{check_header}"
                 f"## CONTEXT\n"
                 f"GitHub Repo: {GITHUB_REPO}\n"
                 f"Commit: `{commit_hash}`\n"
@@ -625,8 +633,8 @@ async def run_unified_loop():
 
                     last_len = len(curr_text)
 
-                    # Completion gate: must have stable ticks AND (has_full_patch OR len >= 2000 OR 5min timeout)
-                    if stable_ticks >= STABLE_TICKS_REQUIRED and (has_full_patch or len(curr_text) >= 2000 or (time.time() - start_wait) > 300):
+                    # Completion gate: must have stable ticks AND (has_full_patch OR len >= 2000 OR 120s timeout)
+                    if stable_ticks >= STABLE_TICKS_REQUIRED and (has_full_patch or len(curr_text) >= 2000 or (time.time() - start_wait) > 120):
                         stable_text = curr_text
                         break
 
