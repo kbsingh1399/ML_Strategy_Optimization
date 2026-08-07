@@ -1,21 +1,5 @@
-You are the Binance API Compliance Auditor. Please audit the file `binance_broker.py` in the repository:
-1. Under the new 2025/2026 Binance Futures Algo Order API spec, does `POST /fapi/v1/algoOrder` require `algoType='CONDITIONAL'` to be explicitly passed in the request body?
-2. If `algoType` is missing in `_place_algo_conditional` on lines 279-291:
-```python
-    def _place_algo_conditional(
-        self, symbol: str, side: str, order_type: str, trigger_price: float, label: str
-    ) -> Optional[dict]:
-        params = {
-            "symbol": symbol,
-            "side": side,
-            "type": order_type,
-            "stopPrice": str(trigger_price),
-            "closePosition": "true",
-            "workingType": "MARK_PRICE",
-            "priceProtect": "true",
-        }
-        res = self._request("POST", "/fapi/v1/algoOrder", params=params, signed=True)
-```
-Please provide the exact, corrected `_place_algo_conditional` function to include `"algoType": "CONDITIONAL"`.
-3. Verify if `priceProtect='true'` is correct, or should it be boolean `priceProtect=True` when serialized via `urllib.parse.urlencode()`.
-4. Provide the exact corrected code block to copy-paste into `binance_broker.py` to ensure all conditional algo orders are 100% compliant.
+You are the Signal Refinement & Alpha Generation Auditor. Please audit the file `ensemble_strategy_predictor.py` in the repository.
+Specifically, review the 7 trading strategy signal functions (S1 to S7) on lines 284-399:
+1. S1-S5 and S7 use the chop index filter `_is_chop()` and `_cvd_ok()` to suppress false signals, but S6 (OI Momentum) is completely missing these filters. Check if S6 should also incorporate `_atr_scale()`, `_is_chop()`, and `_cvd_ok()`.
+2. Verify if the dynamic threshold formulas and filter thresholds in S1 to S7 are mathematically optimal for Binance Futures perp swaps.
+3. Provide the exact, drop-in Python code patches/blocks for `ensemble_strategy_predictor.py` to refine these signal functions and optimize their win-rates.
