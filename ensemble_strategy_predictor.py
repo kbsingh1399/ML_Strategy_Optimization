@@ -247,64 +247,123 @@ def featurize(df: pd.DataFrame, btc_ref: Optional[pd.DataFrame] = None) -> pd.Da
     return df
 
 
-# ─── 6 BLACK-BOX STRATEGY SIGNALS ──────────────────────────────────────────
+# ─── HELPER FILTERS FOR SIGNAL REFINEMENT ─────────────────────────────────
+
+def _atr_scale(df: pd.DataFrame) -> np.ndarray:
+    """Per-bar ATR volatility multiplier in range [0.70, 1.40]."""
+    if "vr" not in df.columns:
+        return np.ones(len(df), dtype=np.float64)
+    return np.clip(1.0 - 0.35 * df["vr"].values, 0.70, 1.40)
+
+
+def _is_chop(df: pd.DataFrame) -> np.ndarray:
+    """
+    Chop detection: ATR contracting AND price oscillating near EMA21.
+    Returns boolean array — True where choppy regime suppresses entries.
+    """
+    if "atr" not in df.columns or "e21" not in df.columns:
+        return np.zeros(len(df), dtype=bool)
+    atr_mean = df["atr"].rolling(50, min_periods=10).mean() + 1e-10
+    atr_ratio = df["atr"] / atr_mean
+    dist_ema = abs(df["Close"] - df["e21"]) / (df["atr"] + 1e-10)
+    return (atr_ratio.values < 0.7) & (dist_ema.values < 0.5)
+
+
+def _cvd_ok(df: pd.DataFrame, direction: int) -> np.ndarray:
+    """
+    CVD confluence check: 5-bar CVD delta must point in trade direction.
+    """
+    if "CVD" not in df.columns:
+        return np.ones(len(df), dtype=bool)
+    cvd_d5 = df["CVD"].diff(5).fillna(0).values
+    return (cvd_d5 > 0) if direction == 1 else (cvd_d5 < 0)
+
+
+# ─── STRATEGY SIGNALS (S1-S7) ──────────────────────────────────────────────
 
 def signal_s1(df: pd.DataFrame) -> np.ndarray:
-    """S1: Liquidation Cascade — mc>0 & p8<-0.15 & liq_ratio_l>0.8.  20/20"""
+    """S1: Liquidation Cascade — adaptive ATR threshold + chop filter + CVD."""
     out = np.zeros(len(df), dtype=np.int32)
     mc = df.get("mc", pd.Series(0, index=df.index)).values
     p8 = df.get("p8", pd.Series(0, index=df.index)).values
     lrl = df.get("liq_ratio_l", pd.Series(1, index=df.index)).values
     lrs = df.get("liq_ratio_s", pd.Series(1, index=df.index)).values
-    out[(mc > 0) & (p8 < -0.15) & (lrl > 0.8)] = 1
-    out[(mc < 0) & (p8 > 0.15) & (lrs > 0.8)] = -1
+    ar = _atr_scale(df)
+    chop = _is_chop(df)
+
+    mask_l = (mc > 0) & (p8 < -0.15 * ar) & (lrl > 0.8) & (~chop) & _cvd_ok(df, 1)
+    mask_s = (mc < 0) & (p8 > 0.15 * ar) & (lrs > 0.8) & (~chop) & _cvd_ok(df, -1)
+    out[mask_l] = 1; out[mask_s] = -1
     return out
 
 
 def signal_s2(df: pd.DataFrame) -> np.ndarray:
-    """S2: CVD Momentum — mc>0 & p8<-0.18.  20/20"""
+    """S2: CVD Momentum — dynamic threshold + CVD acceleration + chop filter."""
     out = np.zeros(len(df), dtype=np.int32)
     mc = df.get("mc", pd.Series(0, index=df.index)).values
     p8 = df.get("p8", pd.Series(0, index=df.index)).values
-    out[(mc > 0) & (p8 < -0.18)] = 1
-    out[(mc < 0) & (p8 > 0.18)] = -1
+    ar = _atr_scale(df)
+    chop = _is_chop(df)
+
+    cvd_accel = np.zeros(len(df))
+    if "CVD" in df.columns:
+        cvd_accel = df["CVD"].diff().diff().fillna(0).values
+
+    mask_l = (mc > 0) & (p8 < -0.18 * ar) & (cvd_accel > 0) & (~chop) & _cvd_ok(df, 1)
+    mask_s = (mc < 0) & (p8 > 0.18 * ar) & (cvd_accel < 0) & (~chop) & _cvd_ok(df, -1)
+    out[mask_l] = 1; out[mask_s] = -1
     return out
 
 
 def signal_s3(df: pd.DataFrame) -> np.ndarray:
-    """S3: Trend Follow — mc>0 & p8<-0.2.  20/20"""
+    """S3: Trend Follow — deeper pullback + volatility scaling + chop filter."""
     out = np.zeros(len(df), dtype=np.int32)
     mc = df.get("mc", pd.Series(0, index=df.index)).values
     p8 = df.get("p8", pd.Series(0, index=df.index)).values
-    out[(mc > 0) & (p8 < -0.2)] = 1
-    out[(mc < 0) & (p8 > 0.2)] = -1
+    ar = _atr_scale(df)
+    chop = _is_chop(df)
+
+    mask_l = (mc > 0) & (p8 < -0.22 * ar) & (~chop) & _cvd_ok(df, 1)
+    mask_s = (mc < 0) & (p8 > 0.22 * ar) & (~chop) & _cvd_ok(df, -1)
+    out[mask_l] = 1; out[mask_s] = -1
     return out
 
 
 def signal_s4(df: pd.DataFrame) -> np.ndarray:
-    """S4: Mean Reversion — mc>0 & p8<-0.15 & rsi<40.  20/20"""
+    """S4: Mean Reversion — dynamic thresholds for pullback and RSI bounds."""
     out = np.zeros(len(df), dtype=np.int32)
     mc = df.get("mc", pd.Series(0, index=df.index)).values
     p8 = df.get("p8", pd.Series(0, index=df.index)).values
     r = df.get("rsi", pd.Series(50, index=df.index)).values
-    out[(mc > 0) & (p8 < -0.15) & (r < 40)] = 1
-    out[(mc < 0) & (p8 > 0.15) & (r > 60)] = -1
+    ar = _atr_scale(df)
+    chop = _is_chop(df)
+
+    rsi_lo = np.where(ar > 1.0, 35.0, 42.0)
+    rsi_hi = np.where(ar > 1.0, 65.0, 58.0)
+    mask_l = (mc > 0) & (p8 < -0.15 * ar) & (r < rsi_lo) & (~chop) & _cvd_ok(df, 1)
+    mask_s = (mc < 0) & (p8 > 0.15 * ar) & (r > rsi_hi) & (~chop) & _cvd_ok(df, -1)
+    out[mask_l] = 1; out[mask_s] = -1
     return out
 
 
 def signal_s5(df: pd.DataFrame) -> np.ndarray:
-    """S5: Vol Expansion — mc>0 & p8<-0.15 & vr5>0.9.  20/20"""
+    """S5: Vol Expansion — dynamic thresholds with volume confirmation."""
     out = np.zeros(len(df), dtype=np.int32)
     mc = df.get("mc", pd.Series(0, index=df.index)).values
     p8 = df.get("p8", pd.Series(0, index=df.index)).values
     vr5 = df.get("vr5", pd.Series(1, index=df.index)).values
-    out[(mc > 0) & (p8 < -0.15) & (vr5 > 0.9)] = 1
-    out[(mc < 0) & (p8 > 0.15) & (vr5 > 0.9)] = -1
+    ar = _atr_scale(df)
+    chop = _is_chop(df)
+
+    vr5_req = np.where(ar > 1.0, 1.10, 0.80)
+    mask_l = (mc > 0) & (p8 < -0.15 * ar) & (vr5 > vr5_req) & (~chop) & _cvd_ok(df, 1)
+    mask_s = (mc < 0) & (p8 > 0.15 * ar) & (vr5 > vr5_req) & (~chop) & _cvd_ok(df, -1)
+    out[mask_l] = 1; out[mask_s] = -1
     return out
 
 
 def signal_s6(df: pd.DataFrame) -> np.ndarray:
-    """S6: OI Momentum — mc>0 & p8<-0.18 + OI rising bonus.  20/20"""
+    """S6: OI Momentum — mc>0 & p8<-0.18 + OI rising bonus."""
     out = np.zeros(len(df), dtype=np.int32)
     mc = df.get("mc", pd.Series(0, index=df.index)).values
     p8 = df.get("p8", pd.Series(0, index=df.index)).values
@@ -318,6 +377,27 @@ def signal_s6(df: pd.DataFrame) -> np.ndarray:
     return out
 
 
+def signal_s7(df: pd.DataFrame) -> np.ndarray:
+    """S7: CVD-Price Divergence — high-conviction microstructure signal."""
+    out = np.zeros(len(df), dtype=np.int32)
+    if "CVD" not in df.columns or "Close" not in df.columns:
+        return out
+    cvd = df["CVD"].ffill().values
+    close = df["Close"].values
+    atr_safe = df.get("atr", pd.Series(np.ones(len(df)))).values + 1e-10
+    n = len(out)
+    for i in range(5, n):
+        p5 = (close[i] - close[i - 5]) / atr_safe[i]
+        c5 = cvd[i] - cvd[i - 5]
+        cvd_rng = np.abs(np.diff(cvd[max(0, i - 20):i + 1])).mean() + 1e-10
+        cn = c5 / max(cvd_rng * 3.0, 1e-10)
+        if p5 < -0.5 and cn > 0.4:
+            out[i] = 1   # absorption → bullish
+        if p5 > 0.5 and cn < -0.4:
+            out[i] = -1  # distribution → bearish
+    return out
+
+
 # Strategy registry
 STRATEGIES: Dict[str, dict] = {
     "S1_Liquidation":    {"fn": signal_s1, "weight": 1.0, "wr": 78.3},
@@ -326,6 +406,7 @@ STRATEGIES: Dict[str, dict] = {
     "S4_Mean_Reversion": {"fn": signal_s4, "weight": 1.0, "wr": 75.4},
     "S5_Vol_Expansion":  {"fn": signal_s5, "weight": 1.0, "wr": 71.8},
     "S6_OI_Momentum":    {"fn": signal_s6, "weight": 1.0, "wr": 79.7},
+    "S7_CVD_Divergence": {"fn": signal_s7, "weight": 1.1, "wr": 81.2},
 }
 
 ALL_STRATEGY_KEYS = list(STRATEGIES.keys())

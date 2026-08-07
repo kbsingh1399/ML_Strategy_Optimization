@@ -417,7 +417,7 @@ class PortfolioRiskManager:
     Calculates rolling correlations and scales position sizes when portfolio heat exceeds threshold.
     """
     def __init__(self, symbols: List[str] = None, max_portfolio_heat: float = 0.15, max_corr_threshold: float = 0.70):
-        self.symbols = symbols or SYMBOLS
+        self.symbols = symbols or ALL_SYMBOLS
         self.max_heat = max_portfolio_heat
         self.max_corr = max_corr_threshold
         self.price_history: Dict[str, deque] = {s: deque(maxlen=720) for s in self.symbols}
