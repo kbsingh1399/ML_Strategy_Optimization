@@ -412,15 +412,11 @@ def extract_code_blocks(text: str) -> list:
         target = None
         for line in block.splitlines()[:5]:
             stripped = line.strip()
-            if not stripped.startswith("#"): continue
-            m = re.search(r"#\s*TARGET:\s*(\S+\.py)", stripped, re.IGNORECASE)
+            m = re.search(r"TARGET:\s*(\S+\.py)", stripped, re.IGNORECASE)
             if m: target = m.group(1); break
-            m = re.search(r"#\s*(\w[\w_]*\.py)\b", stripped, re.IGNORECASE)
+            m = re.search(r"(\w[\w_]*\.py)\b", stripped, re.IGNORECASE)
             if m and m.group(1).lower() in known_files:
                 target = known_files[m.group(1).lower()]; break
-
-        if not target and ("def " in block or "import " in block) and len(block) > 100:
-            target = "Engine_1.py"
 
         if target and block:
             results.append({"file": target, "code": block})
@@ -613,16 +609,34 @@ async def run_unified_loop():
 
                 if patches:
                     backups = []
+                    any_applied = False
                     for patch in patches:
                         target = os.path.join(BASE_DIR, patch["file"])
                         if os.path.exists(target):
-                            bak = f"{target}.bak.{datetime.now().strftime('%H%M%S')}"
-                            shutil.copy2(target, bak)
-                            backups.append((target, bak))
-                            with open(target, "w", encoding="utf-8") as f:
-                                f.write(patch["code"])
+                            with open(target, "r", encoding="utf-8") as f:
+                                orig_content = f.read()
 
-                    await capture_visual(page, "STEP6_PATCHES_APPLIED", f"Applied {len(patches)} code patch(es)")
+                            if len(patch["code"]) >= 0.8 * len(orig_content):
+                                bak = f"{target}.bak.{datetime.now().strftime('%H%M%S')}"
+                                shutil.copy2(target, bak)
+                                backups.append((target, bak))
+                                with open(target, "w", encoding="utf-8") as f:
+                                    f.write(patch["code"])
+                                any_applied = True
+                                log(f"Applied full-file patch to {patch['file']}")
+                            else:
+                                pending_dir = os.path.join(BASE_DIR, "pending_patches")
+                                os.makedirs(pending_dir, exist_ok=True)
+                                patch_name = f"{os.path.basename(target)}_patch_{datetime.now().strftime('%H%M%S')}.py"
+                                patch_path = os.path.join(pending_dir, patch_name)
+                                with open(patch_path, "w", encoding="utf-8") as f:
+                                    f.write(patch["code"])
+                                log(f"Saved partial patch for {patch['file']} to {patch_path}")
+
+                    if any_applied:
+                        await capture_visual(page, "STEP6_PATCHES_APPLIED", f"Applied {len(backups)} full-file patch(es)")
+                    else:
+                        await capture_visual(page, "STEP6_PATCHES_SAVED", "Saved partial patch(es) cleanly to pending_patches/")
 
                     # Test suite
                     passed, report = run_test_suite()
