@@ -472,11 +472,23 @@ async def run_unified_loop():
                     prompt_text = custom_p
                     log(f"Using dynamic prompt from send_to_arena.txt ({len(prompt_text)} chars)")
                 else:
+                    try:
+                        r = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=BASE_DIR)
+                        commit_hash = r.stdout.strip() if r.returncode == 0 else "main"
+                    except Exception:
+                        commit_hash = "main"
+
+                    raw_base = f"https://raw.githubusercontent.com/kbsingh1399/ML_Strategy_Optimization/{commit_hash}"
                     prompt_text = (
                         f"## CONTEXT\n"
                         f"GitHub Repo: {GITHUB_REPO}\n"
-                        f"Branch: master\n"
-                        f"All files are freshly pushed — you can reference the latest code directly.\n\n"
+                        f"Commit: `{commit_hash}`\n"
+                        f"Please fetch the latest updates directly from these raw GitHub files:\n"
+                        f"- Engine_1.py: {raw_base}/Engine_1.py\n"
+                        f"- binance_broker.py: {raw_base}/binance_broker.py\n"
+                        f"- ensemble_strategy_predictor.py: {raw_base}/ensemble_strategy_predictor.py\n"
+                        f"- live_model_trainer.py: {raw_base}/live_model_trainer.py\n"
+                        f"- order_flow_filter.py: {raw_base}/order_flow_filter.py\n\n"
                         f"# ENGINE_1 AUTONOMOUS IMPROVEMENT CYCLE — {topic['title']}\n\n"
                         f"{topic['prompt']}"
                     )
@@ -484,17 +496,29 @@ async def run_unified_loop():
                 prompt_text = (
                     f"## CONTEXT\n"
                     f"GitHub Repo: {GITHUB_REPO}\n"
-                    f"Branch: master\n"
-                    f"All files are freshly pushed — you can reference the latest code directly.\n\n"
+                    f"Branch: main\n"
+                    f"Please reference: {GITHUB_REPO}/tree/main\n\n"
                     f"# ENGINE_1 AUTONOMOUS IMPROVEMENT CYCLE — {topic['title']}\n\n"
                     f"{topic['prompt']}"
                 )
         else:
+            try:
+                r = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=BASE_DIR)
+                commit_hash = r.stdout.strip() if r.returncode == 0 else "main"
+            except Exception:
+                commit_hash = "main"
+
+            raw_base = f"https://raw.githubusercontent.com/kbsingh1399/ML_Strategy_Optimization/{commit_hash}"
             prompt_text = (
                 f"## CONTEXT\n"
                 f"GitHub Repo: {GITHUB_REPO}\n"
-                f"Branch: master\n"
-                f"All files are freshly pushed — you can reference the latest code directly.\n\n"
+                f"Commit: `{commit_hash}`\n"
+                f"Please fetch the latest updates directly from these raw GitHub files:\n"
+                f"- Engine_1.py: {raw_base}/Engine_1.py\n"
+                f"- binance_broker.py: {raw_base}/binance_broker.py\n"
+                f"- ensemble_strategy_predictor.py: {raw_base}/ensemble_strategy_predictor.py\n"
+                f"- live_model_trainer.py: {raw_base}/live_model_trainer.py\n"
+                f"- order_flow_filter.py: {raw_base}/order_flow_filter.py\n\n"
                 f"# ENGINE_1 AUTONOMOUS IMPROVEMENT CYCLE — {topic['title']}\n\n"
                 f"{topic['prompt']}"
             )
@@ -620,7 +644,7 @@ async def run_unified_loop():
                 if patches:
                     backups = []
                     any_applied = False
-                    for patch in patches:
+                    for idx, patch in enumerate(patches, 1):
                         target = os.path.join(BASE_DIR, patch["file"])
                         if os.path.exists(target):
                             with open(target, "r", encoding="utf-8") as f:
@@ -637,11 +661,11 @@ async def run_unified_loop():
                             else:
                                 pending_dir = os.path.join(BASE_DIR, "pending_patches")
                                 os.makedirs(pending_dir, exist_ok=True)
-                                patch_name = f"{os.path.basename(target)}_patch_{datetime.now().strftime('%H%M%S')}.py"
+                                patch_name = f"{os.path.basename(target)}_patch_{datetime.now().strftime('%H%M%S')}_{idx}.py"
                                 patch_path = os.path.join(pending_dir, patch_name)
                                 with open(patch_path, "w", encoding="utf-8") as f:
                                     f.write(patch["code"])
-                                log(f"Saved partial patch for {patch['file']} to {patch_path}")
+                                log(f"Saved partial patch {idx} for {patch['file']} to {patch_path}")
 
                     if any_applied:
                         await capture_visual(page, "STEP6_PATCHES_APPLIED", f"Applied {len(backups)} full-file patch(es)")
