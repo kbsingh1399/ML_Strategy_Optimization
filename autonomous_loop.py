@@ -116,11 +116,14 @@ IMPROVEMENT_TOPICS = [
         "id": "backtest_accuracy",
         "title": "Backtest Accuracy & Walk-Forward Validation",
         "prompt": (
-            "Review backtesting and simulation logic. Suggest:\n"
-            "1. Realistic fill simulation with slippage model based on ATR/volume.\n"
-            "2. Purge/embargo gaps between train and test windows to prevent data leakage.\n"
-            "3. Out-of-sample Sharpe and Calmar ratio reporting per window.\n\n"
-            "Provide improved Python code with ```python ... ``` fencing. Label target file at top: # TARGET: Engine_1.py"
+            "Review backtesting and simulation logic in Engine_1.py and live_model_trainer.py. Suggest:\n"
+            "1. Dynamic Volatility-Based Slippage in Numba:\n"
+            "   Update `simulate_trade_numba` to incorporate a dynamic slippage model. Instead of perfect execution, penalize entry and exit prices by a factor of the candle's ATR (e.g., slippage = 0.05 * ATR) to account for liquidity differences and spread.\n"
+            "2. Train-Test Embargo & Purging Gaps:\n"
+            "   Ensure walk-forward data partitioning and online model booster updates implement an embargo window of at least 96 bars (the labeling horizon) to prevent future data from leaking into the model training sets.\n"
+            "3. Walk-Forward Metric Logging:\n"
+            "   Implement out-of-sample Sharpe and Calmar ratio reporting per testing window to evaluate return-to-downside performance under realistic walk-forward conditions.\n\n"
+            "Provide improved Python code with ```python ... ``` fencing. Label target file at top: # TARGET: Engine_1.py or live_model_trainer.py"
         ),
     },
 ]
