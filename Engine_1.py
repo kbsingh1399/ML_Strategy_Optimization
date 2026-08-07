@@ -492,6 +492,23 @@ class Engine1TradeTracker:
             log.warning(f"[Circuit Breaker] Found {self.halt_file}! Circuit breaker is ACTIVE from previous run. Delete to re-enable.")
             self.emergency_halt = True
 
+        # ── Rolling 1-hour Drawdown Circuit Breaker ─────────────────────
+        # Tracks (timestamp_ns, equity) snapshots; if max equity over any
+        # rolling 60-minute window drops > ROLLING_DD_HALT_PCT, new entries
+        # are paused for ROLLING_DD_HALT_SECS.
+        self._equity_snapshots: deque = deque()
+        self.rolling_dd_halt: bool = False
+        self.rolling_dd_halt_until: float = 0.0
+        self.rolling_dd_halt_pct: float = 5.0
+        self.rolling_dd_halt_secs: int = 3600
+
+        # ── Anti-martingale Position Scaling ────────────────────────────
+        # risk_scale = max(floor, factor^consecutive_losses)
+        # = max(0.25, 0.75^n)
+        self.consecutive_losses: int = 0
+        self.anti_martingale_floor: float = 0.25
+        self.anti_martingale_factor: float = 0.75
+
         # Broker initialization (Binance)
         self.broker = None
         self.broker_executor = None
@@ -702,6 +719,19 @@ class Engine1TradeTracker:
                 log.warning(f"[Risk] Entry blocked: emergency halt")
                 return
 
+            # ── Rolling 1-hour DD circuit breaker ────────────────────
+            if self.rolling_dd_halt:
+                if time.time() < self.rolling_dd_halt_until:
+                    remaining_m = (self.rolling_dd_halt_until - time.time()) / 60.0
+                    log.warning(
+                        f"[Risk] Entry blocked: 1h rolling DD circuit "
+                        f"breaker active ({remaining_m:.0f}m remaining)"
+                    )
+                    return
+                else:
+                    self.rolling_dd_halt = False
+                    log.info("[Risk] 1h rolling DD halt timer expired — resuming entries")
+
             # Daily drawdown check (4% guardrail)
             active_list = list(self.active_trades.values())
             unrealized = sum(t.get('live_pnl_usd', 0.0) for t in active_list)
@@ -780,7 +810,17 @@ class Engine1TradeTracker:
             current_dd = max(0.0, self.peak_capital - self.current_capital)
             raw_zeno = (max_dd_limit - current_dd) / zeno_denom
             zeno_risk_pct = max(0.0, min(risk_cap, raw_zeno)) / max(self.initial_capital, 1.0)
-            risk_capital = max(0.0, self.current_capital) * zeno_risk_pct * risk_mult
+            # ── Anti-martingale scaling ───────────────────────────────
+            if self.consecutive_losses > 0:
+                anti_mart_scale = max(
+                    self.anti_martingale_floor,
+                    self.anti_martingale_factor ** self.consecutive_losses
+                )
+            else:
+                anti_mart_scale = 1.0
+            effective_risk_mult = risk_mult * anti_mart_scale
+
+            risk_capital = max(0.0, self.current_capital) * zeno_risk_pct * effective_risk_mult
             risk_capital = min(risk_capital, MAX_RISK_PER_TRADE_USD)
 
             if risk_capital <= 0.0 or stop_dist <= 0:
@@ -919,6 +959,33 @@ class Engine1TradeTracker:
                         except Exception as e:
                             log.error(f"[CIRCUIT_BREAKER] Failed to close {t['symbol']}: {e}")
 
+            # ── Rolling 1-hour drawdown tracking ──────────────────────
+            now_ns = time.time_ns()
+            self._equity_snapshots.append((now_ns, equity))
+            cutoff_ns = now_ns - 60 * 60 * 1_000_000_000
+            while (self._equity_snapshots and
+                   self._equity_snapshots[0][0] < cutoff_ns):
+                self._equity_snapshots.popleft()
+
+            if len(self._equity_snapshots) >= 2:
+                peak_eq = max(eq for _, eq in self._equity_snapshots)
+                current_eq = self._equity_snapshots[-1][1]
+                if peak_eq > 0:
+                    rolling_dd_pct = (peak_eq - current_eq) / peak_eq * 100.0
+                    if rolling_dd_pct > self.rolling_dd_halt_pct:
+                        if not self.rolling_dd_halt:
+                            self.rolling_dd_halt = True
+                            self.rolling_dd_halt_until = (
+                                time.time() + self.rolling_dd_halt_secs
+                            )
+                            log.critical(
+                                f"1H ROLLING DD CIRCUIT BREAKER: "
+                                f"{rolling_dd_pct:.2f}% > "
+                                f"{self.rolling_dd_halt_pct:.1f}% — "
+                                f"halting new entries until "
+                                f"{datetime.fromtimestamp(self.rolling_dd_halt_until).strftime('%H:%M:%S')}"
+                            )
+
     def check_exits(self, symbol: str, current_price: float,
                     current_atr: float = 0.0) -> None:
         """Check and execute SL/TP/trailing stop exits."""
@@ -976,6 +1043,31 @@ class Engine1TradeTracker:
                                 trade['sl'] = ns
                                 sl = ns
                                 broker_modify_jobs.append((trade.get('symbol'), ns, trade['tp']))
+
+                # Dynamic ATR stop tightening
+                # ───────────────────────────────────────────────────────
+                # When current volatility (current_atr) exceeds entry
+                # volatility (entry_atr) by >30 %, the market is in a
+                # regime expansion → tighten the stop by 15 % so losses
+                # don't balloon.  Minimum stop = 0.3 % of entry price.
+                entry_atr = trade.get('atr', 0.0)
+                if (entry_atr > 0 and current_atr > 0 and
+                        current_atr > entry_atr * 1.30):
+                    old_sl = trade['sl']
+                    old_sl_dist = abs(entry_price - old_sl)
+                    min_sl_dist = entry_price * 0.003
+                    new_sl_dist = max(old_sl_dist * 0.85, min_sl_dist)
+                    if direction == 1:
+                        trade['sl'] = entry_price - new_sl_dist
+                    else:
+                        trade['sl'] = entry_price + new_sl_dist
+                    sl = trade['sl']
+                    log.debug(
+                        f"[ATR-Tighten] {trade['trade_id']}: "
+                        f"entry_ATR={entry_atr:.4f} cur_ATR={current_atr:.4f} "
+                        f"(ratio={current_atr/entry_atr:.2f}) → "
+                        f"SL tightened from {old_sl:.4f} to {sl:.4f}"
+                    )
 
                 # Timeout exit (24 hours)
                 elapsed = time.time() - trade.get('entry_timestamp', time.time())
@@ -1044,6 +1136,25 @@ class Engine1TradeTracker:
                     self.current_capital += pnl_usd
                     if self.current_capital > self.peak_capital:
                         self.peak_capital = self.current_capital
+
+                    # ── Anti-martingale: track consecutive losses ──
+                    if pnl_usd < 0:
+                        self.consecutive_losses += 1
+                        scale = max(
+                            self.anti_martingale_floor,
+                            self.anti_martingale_factor ** self.consecutive_losses
+                        )
+                        log.info(
+                            f"[Risk] Consecutive losses: {self.consecutive_losses} "
+                            f"→ position scale = {scale:.0%}"
+                        )
+                    else:
+                        if self.consecutive_losses > 0:
+                            log.info(
+                                f"[Risk] Win resets consecutive-loss counter "
+                                f"(was {self.consecutive_losses})"
+                            )
+                        self.consecutive_losses = 0
 
                     # Record strategy R-multiple for dynamic ensemble Sharpe weighting
                     strategy = trade.get('strategy', '')

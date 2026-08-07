@@ -264,16 +264,30 @@ async def auto_dismiss_modals(page):
             log(f"Auto-dismissed feedback popup: '{clicked}'")
             # Scroll down fully and attempt clicking copy button
             await page.evaluate("""() => {
-                const scroller = document.querySelector('div.overflow-y-auto')
-                              || document.querySelector('main')
-                              || document.documentElement;
-                if (scroller) scroller.scrollTop = scroller.scrollHeight;
-                const copyBtn = [...document.querySelectorAll('button')].find(b => {
-                    const cls = (b.className || '').toLowerCase();
-                    const aria = (b.getAttribute('aria-label') || '').toLowerCase();
-                    return cls.includes('justify-center') || aria.includes('copy');
-                });
-                if (copyBtn) copyBtn.click();
+                const proseBlocks = [...document.querySelectorAll('div.prose')].filter(d => !d.className.includes('tiptap'));
+                if (proseBlocks.length > 0) {
+                    const lastBlock = proseBlocks[proseBlocks.length - 1];
+                    lastBlock.scrollIntoView({ behavior: 'auto', block: 'end' });
+                    let el = lastBlock;
+                    while (el && el !== document.body) {
+                        if (el.scrollHeight > el.clientHeight && el.clientHeight > 0) {
+                            el.scrollTop = el.scrollHeight;
+                        }
+                        el = el.parentElement;
+                    }
+                }
+                window.scrollTo(0, document.body.scrollHeight);
+                if (document.documentElement) document.documentElement.scrollTop = document.documentElement.scrollHeight;
+
+                const copyBtns = [...document.querySelectorAll('button[aria-label="Copy"], button[title="Copy"]')];
+                if (copyBtns.length === 0) {
+                    const altBtns = [...document.querySelectorAll('button')].filter(b => (b.className||'').includes('hover:bg-accent'));
+                    copyBtns.push(...altBtns);
+                }
+                if (copyBtns.length > 0) {
+                    const lastCopy = copyBtns[copyBtns.length - 1];
+                    lastCopy.click();
+                }
             }""")
             await capture_visual(page, "MODAL_DISMISSED_SCROLLED_COPIED", f"Clicked '{clicked}', scrolled down, and hit Copy button")
     except Exception:
@@ -287,12 +301,14 @@ async def send_prompt(page, msg: str) -> bool:
 
         focused = await page.evaluate("""() => {
             const editor = document.querySelector('div.tiptap.ProseMirror')
+                        || document.querySelector('div.editor-content')
                         || document.querySelector('div.tiptap')
-                        || document.querySelector('p[data-placeholder*="What would you like"]')
+                        || document.querySelector('p.is-editor-empty')
                         || document.querySelector('[contenteditable="true"]');
             if (!editor) return false;
+            editor.scrollIntoView({ behavior: 'auto', block: 'center' });
             editor.focus();
-            editor.textContent = '';
+            editor.click();
             return true;
         }""")
 
@@ -324,15 +340,12 @@ async def send_prompt(page, msg: str) -> bool:
 async def has_copy_button(page) -> bool:
     try:
         return bool(await page.evaluate("""() => {
-            const btns = [...document.querySelectorAll('button')];
-            for (const b of btns) {
-                const cls = (b.className || '').toLowerCase();
-                const aria = (b.getAttribute('aria-label') || '').toLowerCase();
-                const title = (b.getAttribute('title') || '').toLowerCase();
-                if (cls.includes('flex') && cls.includes('items-center') && cls.includes('justify-center')) return true;
-                if (aria.includes('copy') || title.includes('copy')) return true;
+            const copyBtns = [...document.querySelectorAll('button[aria-label="Copy"], button[title="Copy"]')];
+            if (copyBtns.length === 0) {
+                const altBtns = [...document.querySelectorAll('button')].filter(b => (b.className||'').includes('hover:bg-accent'));
+                copyBtns.push(...altBtns);
             }
-            return false;
+            return copyBtns.length > 0;
         }"""))
     except Exception:
         return False
@@ -340,14 +353,92 @@ async def has_copy_button(page) -> bool:
 
 async def is_generating(page) -> bool:
     try:
-        count = await page.evaluate("""
-            () => document.querySelectorAll(
-                '[class*=animate], [class*=pulse], [class*=spin], [class*=blink], [class*=streaming]'
-            ).length
-        """)
-        return int(count or 0) > 0
+        return bool(await page.evaluate("""() => {
+            const stopBtn = [...document.querySelectorAll('button')].find(b => {
+                const title = (b.getAttribute('title') || '').toLowerCase();
+                const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+                return title.includes('stop') || aria.includes('stop');
+            });
+            return !!stopBtn;
+        }"""))
     except Exception:
         return False
+
+
+async def get_response_text(page) -> str:
+    try:
+        text = await page.evaluate("""() => {
+            const proseBlocks = [...document.querySelectorAll('div.prose')].filter(d => !d.className.includes('tiptap'));
+            if (proseBlocks.length === 0) return '';
+            const lastBlock = proseBlocks[proseBlocks.length - 1];
+
+            // Deep scroll into view across all parent overflow containers
+            lastBlock.scrollIntoView({ behavior: 'auto', block: 'end' });
+            let el = lastBlock;
+            while (el && el !== document.body) {
+                if (el.scrollHeight > el.clientHeight && el.clientHeight > 0) {
+                    el.scrollTop = el.scrollHeight;
+                }
+                el = el.parentElement;
+            }
+            window.scrollTo(0, document.body.scrollHeight);
+            if (document.documentElement) document.documentElement.scrollTop = document.documentElement.scrollHeight;
+
+            return (lastBlock.innerText || lastBlock.textContent || '').trim();
+        }""")
+        return text or ""
+    except Exception:
+        return ""
+
+
+def extract_code_blocks(text: str) -> list:
+    results = []
+    pattern = re.compile(r"```(?:python|py)?\s*\n?(.*?)```", re.DOTALL | re.IGNORECASE)
+    known_files = {f.lower(): f for f in CORE_FILES}
+
+    for match in pattern.finditer(text):
+        block = match.group(1).strip()
+        if not block: continue
+        target = None
+        for line in block.splitlines()[:5]:
+            stripped = line.strip()
+            if not stripped.startswith("#"): continue
+            m = re.search(r"#\s*TARGET:\s*(\S+\.py)", stripped, re.IGNORECASE)
+            if m: target = m.group(1); break
+            m = re.search(r"#\s*(\w[\w_]*\.py)\b", stripped, re.IGNORECASE)
+            if m and m.group(1).lower() in known_files:
+                target = known_files[m.group(1).lower()]; break
+
+        if not target and ("def " in block or "import " in block) and len(block) > 100:
+            target = "Engine_1.py"
+
+        if target and block:
+            results.append({"file": target, "code": block})
+
+    return results
+
+
+def run_test_suite() -> tuple:
+    existing = [f for f in CORE_FILES if os.path.exists(os.path.join(BASE_DIR, f))]
+    try:
+        r = subprocess.run([sys.executable, "-m", "py_compile"] + existing, capture_output=True, text=True, timeout=30, cwd=BASE_DIR)
+        if r.returncode != 0: return False, f"SYNTAX FAIL:\n{r.stderr}"
+    except Exception as e: return False, f"py_compile error: {e}"
+
+    engine_path = os.path.join(BASE_DIR, "Engine_1.py")
+    if os.path.exists(engine_path):
+        try:
+            proc = subprocess.Popen([sys.executable, "-u", engine_path, "--test"], cwd=BASE_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+            try:
+                out, _ = proc.communicate(timeout=8)
+                if proc.returncode not in (0, None): return False, f"Engine crashed:\n{out[-300:]}"
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                log("Local 8s execution test PASS — engine ran without crash.")
+        except Exception as e:
+            return False, f"Execution test error: {e}"
+
+    return True, "All tests PASS"
 
 
 async def run_unified_loop():
@@ -365,15 +456,42 @@ async def run_unified_loop():
 
         log(f"\n--- CYCLE {cycle}: {topic['title']} ---")
 
-        # Step 2: Build prompt with live repo header
-        prompt_text = (
-            f"## CONTEXT\n"
-            f"GitHub Repo: {GITHUB_REPO}\n"
-            f"Branch: master\n"
-            f"All files are freshly pushed — you can reference the latest code directly.\n\n"
-            f"# ENGINE_1 AUTONOMOUS IMPROVEMENT CYCLE — {topic['title']}\n\n"
-            f"{topic['prompt']}"
-        )
+        # Step 2: Build prompt (check send_to_arena.txt override first)
+        SEND_FILE = os.path.join(BASE_DIR, "send_to_arena.txt")
+        if os.path.exists(SEND_FILE):
+            try:
+                with open(SEND_FILE, "r", encoding="utf-8") as f:
+                    custom_p = f.read().strip()
+                if custom_p:
+                    prompt_text = custom_p
+                    log(f"Using dynamic prompt from send_to_arena.txt ({len(prompt_text)} chars)")
+                else:
+                    prompt_text = (
+                        f"## CONTEXT\n"
+                        f"GitHub Repo: {GITHUB_REPO}\n"
+                        f"Branch: master\n"
+                        f"All files are freshly pushed — you can reference the latest code directly.\n\n"
+                        f"# ENGINE_1 AUTONOMOUS IMPROVEMENT CYCLE — {topic['title']}\n\n"
+                        f"{topic['prompt']}"
+                    )
+            except Exception:
+                prompt_text = (
+                    f"## CONTEXT\n"
+                    f"GitHub Repo: {GITHUB_REPO}\n"
+                    f"Branch: master\n"
+                    f"All files are freshly pushed — you can reference the latest code directly.\n\n"
+                    f"# ENGINE_1 AUTONOMOUS IMPROVEMENT CYCLE — {topic['title']}\n\n"
+                    f"{topic['prompt']}"
+                )
+        else:
+            prompt_text = (
+                f"## CONTEXT\n"
+                f"GitHub Repo: {GITHUB_REPO}\n"
+                f"Branch: master\n"
+                f"All files are freshly pushed — you can reference the latest code directly.\n\n"
+                f"# ENGINE_1 AUTONOMOUS IMPROVEMENT CYCLE — {topic['title']}\n\n"
+                f"{topic['prompt']}"
+            )
 
         try:
             async with async_playwright() as pw:
@@ -398,22 +516,30 @@ async def run_unified_loop():
                 git_push(msg_label=f"Pre-prompt-{topic['id']}")
                 await capture_visual(page, "STEP1_GIT_PUSH_OK", f"Pre-prompt sync for {topic['id']}")
 
-                # Step 3: Type Prompt into Arena Editor
-                log(f"Step 3: Typing prompt into Arena editor ({len(prompt_text)} chars)...")
+                # Step 3: Check if Arena is active or prompt is already in progress
                 await auto_dismiss_modals(page)
 
-                # Check if already generating
                 if await is_generating(page):
-                    log("Arena currently active — waiting for current loop to complete...")
+                    log("Arena currently active — waiting for current response to complete before sending new prompt...")
                     while await is_generating(page):
+                        await auto_dismiss_modals(page)
                         await asyncio.sleep(5)
 
+                log(f"Step 3: Inserting prompt safely into Arena editor ({len(prompt_text)} chars)...")
                 await capture_visual(page, "STEP3_TYPING_PROMPT", f"Typing prompt for {topic['title']}")
+
                 sent = await send_prompt(page, prompt_text)
                 if not sent:
                     log("Prompt submission failed. Retrying cycle...")
                     await asyncio.sleep(5)
                     continue
+
+                # Clear send_to_arena.txt to prevent re-submitting the same prompt
+                if os.path.exists(SEND_FILE):
+                    try:
+                        shutil.move(SEND_FILE, SEND_FILE + ".done")
+                    except Exception:
+                        pass
 
                 await capture_visual(page, "STEP4_SUBMITTED", f"Prompt submitted for {topic['title']}")
                 log("Step 4: Prompt submitted (Send Button Hit). Waiting for Copy button...")
@@ -513,8 +639,15 @@ async def run_unified_loop():
                 await capture_visual(page, "STEP7_CYCLE_COMPLETE", f"Cycle {cycle} complete for topic '{topic['id']}'")
                 await asyncio.sleep(5)
 
+                if "--single-run" in sys.argv:
+                    log("Single run mode active. Terminating loop.")
+                    return
+
         except Exception as e:
             log(f"Cycle exception: {e}")
+            if "--single-run" in sys.argv:
+                log("Single run mode active (with exception). Terminating.")
+                return
 
 
 if __name__ == "__main__":
