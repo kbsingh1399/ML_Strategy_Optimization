@@ -279,6 +279,24 @@ def _cvd_ok(df: pd.DataFrame, direction: int) -> np.ndarray:
     return (cvd_d5 > 0) if direction == 1 else (cvd_d5 < 0)
 
 
+def _atr_scale_threshold(base: float, atr_scale: np.ndarray) -> np.ndarray:
+    """Dynamically scale a fixed threshold by current ATR ratio in a vectorized way."""
+    bias = 1.0 + 0.50 * (atr_scale - 1.0)
+    return base * np.clip(bias, 0.85, 1.15)
+
+
+def _regime_pass(chop: np.ndarray, cvdb: np.ndarray, cvdu: np.ndarray) -> np.ndarray:
+    """Vectorized chop + CVD-divergence filter. True = regime OK to trade."""
+    return (chop == 0) & (cvdb == 0) & (cvdu == 0)
+
+
+def _oi_cvd_confluence(oi_rising: np.ndarray, cvd_d: np.ndarray) -> np.ndarray:
+    """True when OI and CVD momentum agree.
+    Blocks: OI rising + CVD falling = passive positioning, not real demand.
+    """
+    return ~((oi_rising > 0) & (cvd_d < 0))
+
+
 # ─── STRATEGY SIGNALS (S1-S7) ──────────────────────────────────────────────
 
 def signal_s1(df: pd.DataFrame) -> np.ndarray:
@@ -363,17 +381,37 @@ def signal_s5(df: pd.DataFrame) -> np.ndarray:
 
 
 def signal_s6(df: pd.DataFrame) -> np.ndarray:
-    """S6: OI Momentum — mc>0 & p8<-0.18 + OI rising bonus."""
+    """S6: OI Momentum — ATR + chop + CVD + OI-CVD confluence"""
     out = np.zeros(len(df), dtype=np.int32)
     mc = df.get("mc", pd.Series(0, index=df.index)).values
     p8 = df.get("p8", pd.Series(0, index=df.index)).values
     oi_rising = df.get("oi_rising", pd.Series(0, index=df.index)).values
-    mask_trend_l = (mc > 0) & (p8 < -0.18)
-    mask_trend_s = (mc < 0) & (p8 > 0.18)
-    mask_oi_l = (mc > 0) & (p8 < -0.12) & (oi_rising > 0)
-    mask_oi_s = (mc < 0) & (p8 > 0.12) & (oi_rising > 0)
-    out[mask_trend_l | mask_oi_l] = 1
-    out[mask_trend_s | mask_oi_s] = -1
+    cvd_d = df.get("cvd_d", pd.Series(0, index=df.index)).values
+
+    atr_s = _atr_scale(df)
+    chop = _is_chop(df).astype(np.int32)
+    cvdb = df.get("cvd_div_bear", pd.Series(0, index=df.index)).values
+    cvdu = df.get("cvd_div_bull", pd.Series(0, index=df.index)).values
+
+    regime_ok = _regime_pass(chop, cvdb, cvdu)
+    oi_cvd_ok = _oi_cvd_confluence(oi_rising, cvd_d)
+
+    th_trend = _atr_scale_threshold(0.18, atr_s)
+    th_oi    = _atr_scale_threshold(0.12, atr_s)
+
+    # Trend leg: macro-aligned + p8 beyond dynamic threshold
+    trend_l = (mc > 0) & (p8 < -th_trend)
+    trend_s = (mc < 0) & (p8 >  th_trend)
+
+    # OI leg: looser threshold + OI rising + OI-CVD confluence
+    oi_l = (mc > 0) & (p8 < -th_oi) & (oi_rising > 0) & oi_cvd_ok
+    oi_s = (mc < 0) & (p8 >  th_oi) & (oi_rising > 0) & oi_cvd_ok
+
+    mask_l = (trend_l | oi_l) & regime_ok
+    mask_s = (trend_s | oi_s) & regime_ok
+
+    out[mask_l] = 1
+    out[mask_s] = -1
     return out
 
 
