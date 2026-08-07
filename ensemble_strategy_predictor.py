@@ -390,7 +390,16 @@ class EnsembleAggregator:
             for name, sig in filtered_signals.items():
                 if name not in STRATEGIES:
                     continue
-                wr = STRATEGIES[name]["wr"] / 100.0
+                base_wt = STRATEGIES[name]["wr"] / 100.0
+                # Read live performance from predictor if available
+                live_mult = 1.0
+                if hasattr(self, '_live_wr') and name in self._live_wr:
+                    live_wr = self._live_wr[name]
+                    # Alert: if live_wr diverges more than 10% from backtest, tilt
+                    if abs(live_wr - base_wt) > 0.10:
+                        live_mult = max(0.5, min(2.0, live_wr / max(base_wt, 0.01)))
+                
+                wr = base_wt * live_mult
                 if sig == 1:
                     weighted_long += wr
                 elif sig == -1:

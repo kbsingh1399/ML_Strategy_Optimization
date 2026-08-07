@@ -118,7 +118,7 @@ class EngineConfig:
     max_drawdown_pct: float = 15.0
     tp_mult: float = 4.0  # Adjusted from 5.0
     trail_atr: float = 1.5  # Adjusted from 0.8
-    fee_pct: float = 0.0020
+    fee_pct: float = 0.0008
     min_confidence: float = 0.50
     min_agreeing: int = 3
     bar_warmup: int = 200
@@ -1620,7 +1620,8 @@ def run_backtest(symbol: str, data_dir: Path = None):
         units = risk / sd
         gross = units * (exit_price - entry) if dr == 1 else units * (entry - exit_price)
         fee_cost = units * entry * (fee / 2.0) + units * abs(exit_price) * (fee / 2.0)
-        net_pnl = gross - fee_cost
+        slippage = units * entry * 0.0005 # 0.05% slippage on market order
+        net_pnl = gross - fee_cost - slippage
         r_mult = net_pnl / risk
         label = 1.0 if net_pnl > 0 else 0.0
         if dr == 1:
