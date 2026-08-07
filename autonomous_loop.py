@@ -589,6 +589,16 @@ async def run_unified_loop():
                     else:
                         stable_ticks = 0
 
+                    # Dynamic Timer Logic: Adapt sleep interval based on streaming activity
+                    sleep_interval = 1.0
+                    char_diff = len(curr_text) - last_len
+                    if generating or is_thinking or char_diff > 100:
+                        sleep_interval = 0.5  # Poll faster during rapid generation
+                    elif char_diff > 0:
+                        sleep_interval = 1.5  # Standard streaming poll
+                    else:
+                        sleep_interval = 3.0  # Slow down when stalled or completed
+
                     last_len = len(curr_text)
 
                     # Completion gate: must have stable ticks AND (has_full_patch OR len >= 2000 OR 5min timeout)
@@ -596,7 +606,7 @@ async def run_unified_loop():
                         stable_text = curr_text
                         break
 
-                    await asyncio.sleep(3)
+                    await asyncio.sleep(sleep_interval)
 
                 log(f"Step 5 COMPLETE: Response captured ({len(stable_text)} chars).")
 

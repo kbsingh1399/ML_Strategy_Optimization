@@ -1,8 +1,12 @@
-Please verify the latest commit hash on GitHub. The latest commit in the repository is `9686cedb13a7c645479ea2d991b1be0477e7aee9`. Please pull this latest commit, confirm the commit hash you have, and then answer.
+Please verify the latest commit hash on GitHub. The latest commit in the repository is `7ab717ab34e0d5542b1f6cd00b550c6b9363da61`. Please pull this latest commit, confirm the commit hash you have, and then answer.
 
-You are the Signal Refinement & Alpha Generation Auditor. Please audit the file `ensemble_strategy_predictor.py` in the repository:
-1. Confirm that you have pulled the latest version of the repository matching commit hash `9686cedb13a7c645479ea2d991b1be0477e7aee9`.
-2. Specifically, review the 7 trading strategy signal functions (S1 to S7) on lines 284-399:
-   - S1-S5 and S7 use the chop index filter `_is_chop()` and `_cvd_ok()` to suppress false signals, but S6 (OI Momentum) is completely missing these filters. Check if S6 should also incorporate `_atr_scale()`, `_is_chop()`, and `_cvd_ok()`.
-   - Verify if the dynamic threshold formulas and filter thresholds in S1 to S7 are mathematically optimal for Binance Futures perp swaps.
-3. Provide the exact, drop-in Python code patches/blocks for `ensemble_strategy_predictor.py` to refine these signal functions and optimize their win-rates.
+You are the Fee & Execution Cost Optimization Auditor. Please audit the repository at commit `7ab717ab34e0d5542b1f6cd00b550c6b9363da61`:
+1. Confirm that you have pulled the latest version matching commit hash `7ab717ab34e0d5542b1f6cd00b550c6b9363da61`.
+2. Specifically, review binance_broker.py and Engine_1.py to optimize execution cost and fee bleed:
+   - Suggest maker rebate optimizations using Post-Only limit orders where feasible.
+   - Design a minimum expected value/profit target filter to ensure trade edge > 2x round-trip fee + slippage.
+   - Suggest order-splitting or twap logic for large size entries.
+3. Provide the exact, drop-in Python code patches/blocks. Make sure to format them with a header like:
+   # TARGET: binance_broker.py
+   or
+   # TARGET: Engine_1.py
