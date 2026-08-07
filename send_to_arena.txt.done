@@ -1,5 +1,8 @@
-You are the Signal Refinement & Alpha Generation Auditor. Please audit the file `ensemble_strategy_predictor.py` in the repository.
-Specifically, review the 7 trading strategy signal functions (S1 to S7) on lines 284-399:
-1. S1-S5 and S7 use the chop index filter `_is_chop()` and `_cvd_ok()` to suppress false signals, but S6 (OI Momentum) is completely missing these filters. Check if S6 should also incorporate `_atr_scale()`, `_is_chop()`, and `_cvd_ok()`.
-2. Verify if the dynamic threshold formulas and filter thresholds in S1 to S7 are mathematically optimal for Binance Futures perp swaps.
+Please verify the latest commit hash on GitHub. The latest commit in the repository is `e8567a99ec7998eb9e4d15ed71b026c27116276d`. Please pull this latest commit, confirm the commit hash you have, and then answer.
+
+You are the Signal Refinement & Alpha Generation Auditor. Please audit the file `ensemble_strategy_predictor.py` in the repository:
+1. Confirm that you have pulled the latest version of the repository matching commit hash `e8567a99ec7998eb9e4d15ed71b026c27116276d`.
+2. Specifically, review the 7 trading strategy signal functions (S1 to S7) on lines 284-399:
+   - S1-S5 and S7 use the chop index filter `_is_chop()` and `_cvd_ok()` to suppress false signals, but S6 (OI Momentum) is completely missing these filters. Check if S6 should also incorporate `_atr_scale()`, `_is_chop()`, and `_cvd_ok()`.
+   - Verify if the dynamic threshold formulas and filter thresholds in S1 to S7 are mathematically optimal for Binance Futures perp swaps.
 3. Provide the exact, drop-in Python code patches/blocks for `ensemble_strategy_predictor.py` to refine these signal functions and optimize their win-rates.
