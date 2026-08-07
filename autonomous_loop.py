@@ -369,7 +369,7 @@ async def is_generating(page) -> bool:
 
 async def get_response_text(page) -> str:
     try:
-        text = await page.evaluate("""() => {
+        text = await page.evaluate(r"""() => {
             const proseBlocks = [...document.querySelectorAll('div.prose')].filter(d => !d.className.includes('tiptap'));
             if (proseBlocks.length === 0) return '';
             const lastBlock = proseBlocks[proseBlocks.length - 1];
@@ -386,7 +386,15 @@ async def get_response_text(page) -> str:
             window.scrollTo(0, document.body.scrollHeight);
             if (document.documentElement) document.documentElement.scrollTop = document.documentElement.scrollHeight;
 
-            return (lastBlock.innerText || lastBlock.textContent || '').trim();
+            const clone = lastBlock.cloneNode(true);
+            const preTags = clone.querySelectorAll('pre');
+            preTags.forEach(pre => {
+                const codeText = pre.innerText || pre.textContent || '';
+                const codeNode = document.createTextNode('\n```python\n' + codeText + '\n```\n');
+                pre.parentNode.replaceChild(codeNode, pre);
+            });
+
+            return (clone.innerText || clone.textContent || '').trim();
         }""")
         return text or ""
     except Exception:
