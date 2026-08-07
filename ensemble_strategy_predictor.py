@@ -653,6 +653,17 @@ def snapshot_to_candle_row(snapshot) -> dict:
 
 # ─── ENSEMBLE AGGREGATOR ───────────────────────────────────────────────────
 
+# ── Static backtest win rates (fallback before live data) ──────────
+STATIC_WR = {
+    "S1_Liquidation": 0.783,
+    "S2_CVD_Momentum": 0.795,
+    "S3_Trend_Follow": 0.707,
+    "S4_Mean_Reversion": 0.754,
+    "S5_Vol_Expansion": 0.718,
+    "S6_OI_Momentum": 0.797,
+    "S7_CVD_Divergence": 0.720,
+}
+
 class EnsembleAggregator:
     """
     Weighted voting ensemble for strategy signals.
@@ -665,6 +676,11 @@ class EnsembleAggregator:
         self.active_strategies = active_strategies if active_strategies is not None else ALL_STRATEGY_KEYS
         self._eff_min_agree = min(self.cfg.min_agreeing, len(self.active_strategies))
         self._strategy_r_history: Dict[str, List[float]] = {s: [] for s in ALL_STRATEGY_KEYS}
+        # ── Live accuracy tracking ──────────────────────────────
+        self._strategy_wins: Dict[str, int] = {s: 0 for s in ALL_STRATEGY_KEYS}
+        self._strategy_total: Dict[str, int] = {s: 0 for s in ALL_STRATEGY_KEYS}
+        self._live_wr: Dict[str, float] = {s: STATIC_WR.get(s, 0.70) for s in ALL_STRATEGY_KEYS}
+        self._min_samples_for_live_wr: int = 10  # need 10 trades before trusting live WR
 
     def record_strategy_outcome(self, strategy_name: str, r_mult: float):
         """Record trade R-multiple outcome for dynamic ensemble Sharpe weighting."""
@@ -673,6 +689,10 @@ class EnsembleAggregator:
                 self._strategy_r_history[strategy_name].append(r_mult)
                 if len(self._strategy_r_history[strategy_name]) > 50:
                     self._strategy_r_history[strategy_name].pop(0)
+                # Track win/loss for EWMA accuracy
+                self._strategy_total[strategy_name] += 1
+                if r_mult > 0:
+                    self._strategy_wins[strategy_name] += 1
             elif strategy_name == "Ensemble_6Strategy":
                 for s in self.active_strategies:
                     if s not in self._strategy_r_history:
@@ -680,6 +700,33 @@ class EnsembleAggregator:
                     self._strategy_r_history[s].append(r_mult)
                     if len(self._strategy_r_history[s]) > 50:
                         self._strategy_r_history[s].pop(0)
+                    self._strategy_total[s] += 1
+                    if r_mult > 0:
+                        self._strategy_wins[s] += 1
+
+    def _compute_live_weights(self) -> Dict[str, float]:
+        """Compute EWMA live-accuracy weights.
+        Blends static backtest WR (70%) with live WR (30%) after
+        minimum samples, transitioning to 50/50 after 30 trades.
+        """
+        weights = {}
+        for name in self.active_strategies:
+            if name not in STATIC_WR:
+                weights[name] = 0.75
+                continue
+            static_wr = STATIC_WR[name]
+            n = self._strategy_total.get(name, 0)
+            if n < self._min_samples_for_live_wr:
+                weights[name] = static_wr
+                continue
+            live_wr = (self._strategy_wins.get(name, 0) / max(n, 1))
+            # Blend ratio: 70% static / 30% live at 10 trades,
+            #            50% / 50% at 30+ trades
+            blend = min(0.50, 0.30 + 0.20 * ((n - 10) / 20.0))
+            blended_wr = static_wr * (1.0 - blend) + live_wr * blend
+            # Floor at 0.40 — never completely zero a strategy
+            weights[name] = max(0.40, blended_wr)
+        return weights
 
     def aggregate(self, strategy_signals: Dict[str, int]) -> Tuple[int, float, int]:
         """
@@ -697,30 +744,19 @@ class EnsembleAggregator:
             if total < 1:
                 return 0, 0.0, 0
 
-            # Weighted voting using historical win rates
+            # ── Dynamic live-accuracy weights ─────────────────────
+            live_weights = self._compute_live_weights()
+
             weighted_long = 0.0
             weighted_short = 0.0
             for name, sig in filtered_signals.items():
-                if name not in STRATEGIES:
-                    continue
-                base_wt = STRATEGIES[name]["wr"] / 100.0
-                # Read live performance from predictor if available
-                live_mult = 1.0
-                if hasattr(self, '_live_wr') and name in self._live_wr:
-                    live_wr = self._live_wr[name]
-                    # Alert: if live_wr diverges more than 10% from backtest, tilt
-                    if abs(live_wr - base_wt) > 0.10:
-                        live_mult = max(0.5, min(2.0, live_wr / max(base_wt, 0.01)))
-                
-                wr = base_wt * live_mult
+                w = live_weights.get(name, STATIC_WR.get(name, 0.70))
                 if sig == 1:
-                    weighted_long += wr
+                    weighted_long += w
                 elif sig == -1:
-                    weighted_short += wr
+                    weighted_short += w
 
-            total_weight = sum(
-                STRATEGIES[n]["wr"] for n in filtered_signals if n in STRATEGIES
-            ) / 100.0
+            total_weight = sum(live_weights.get(n, 0.70) for n in filtered_signals)
 
             if total_weight == 0:
                 return 0, 0.0, 0
@@ -799,6 +835,12 @@ class EnsembleStrategyPredictor:
         # Order Flow Microstructure Filters
         self.order_flow: Dict[str, OrderFlowMicrostructureFilter] = {
             sym: OrderFlowMicrostructureFilter(symbol=sym) for sym in symbols
+        }
+
+        # Online Model Updaters
+        from live_model_trainer import OnlineModelUpdater
+        self.online_updater: Dict[str, OnlineModelUpdater] = {
+            sym: OnlineModelUpdater(symbol=sym) for sym in symbols
         }
 
         # ─── WARM-UP GATE ──────────────────────────────────────────
@@ -1042,6 +1084,16 @@ class EnsembleStrategyPredictor:
                 return
             self.latest_atr[symbol] = atr_val
 
+            # Call online updater on new candle close
+            if symbol in self.online_updater:
+                close_val = float(df.iloc[-1]['Close'])
+                high_val = float(df.iloc[-1]['High'])
+                low_val = float(df.iloc[-1]['Low'])
+                features_dict = dff.iloc[-1].to_dict()
+                self.online_updater[symbol].on_new_candle(
+                    close_val, high_val, low_val, atr_val, features_dict
+                )
+
             macro = int(dff['mc'].values[-1])
             p8_val = float(dff['p8'].values[-1])
 
@@ -1068,6 +1120,17 @@ class EnsembleStrategyPredictor:
 
             # Aggregate through ensemble
             direction, confidence, agreeing = self.ensemble.aggregate(strategy_signals)
+
+            # Dynamic online learning confidence adjustment
+            if symbol in self.online_updater:
+                features_dict = dff.iloc[-1].to_dict()
+                online_prob = self.online_updater[symbol].predict_proba(features_dict)
+                if online_prob is not None:
+                    if direction == 1:
+                        confidence = 0.7 * confidence + 0.3 * online_prob
+                    elif direction == -1:
+                        confidence = 0.7 * confidence + 0.3 * (1.0 - online_prob)
+                    log.info(f"[OnlineModel] {symbol}: prob={online_prob:.2f} adjusted confidence to {confidence:.2f}")
 
             # Build ml_signals dict for dashboard
             ml_sigs = self.ensemble.get_ml_signals_dict(

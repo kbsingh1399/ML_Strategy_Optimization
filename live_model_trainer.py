@@ -13,6 +13,9 @@ import os
 import sys
 import gc
 import json
+import logging
+from collections import deque
+from typing import List, Dict, Tuple, Optional, Any
 import numpy as np
 import pandas as pd
 import lightgbm as lgb
@@ -23,6 +26,7 @@ import warnings
 from datetime import datetime
 
 warnings.filterwarnings('ignore')
+log = logging.getLogger("live_model_trainer")
 
 # -------------------------------------------------------------------------
 # CONSTANTS & CONFIGURATION
@@ -135,6 +139,58 @@ def compute_fvg_and_sweeps(high: np.ndarray, low: np.ndarray, close: np.ndarray,
 # -------------------------------------------------------------------------
 # FEATURE ENGINEERING PREPROCESSORS
 # -------------------------------------------------------------------------
+def _add_advanced_features(df: pd.DataFrame, feature_list: list,
+                            price_col: str = "Close",
+                            cvd_col: str = "CVD") -> None:
+    """Add log-returns, rolling higher moments, and temporal lags
+    to the DataFrame and extend feature_list in-place."""
+    new_feats = []
+
+    # ── Log returns (1-bar, 3-bar, 5-bar) ────────────────────────
+    if price_col in df.columns:
+        for lag in [1, 3, 5]:
+            col = f"log_ret_{lag}"
+            df[col] = np.log(df[price_col] / df[price_col].shift(lag).replace(0, np.nan))
+            df[col] = df[col].fillna(0).replace([np.inf, -np.inf], 0)
+            new_feats.append(col)
+
+    # ── Rolling higher moments of log_ret_1 (20-bar window) ──────
+    if "log_ret_1" in df.columns:
+        r = df["log_ret_1"]
+        for w in [10, 20]:
+            df[f"ret_skew_{w}"] = r.rolling(w, min_periods=5).skew().fillna(0)
+            df[f"ret_kurt_{w}"] = r.rolling(w, min_periods=5).kurt().fillna(0)
+            new_feats.extend([f"ret_skew_{w}", f"ret_kurt_{w}"])
+
+    # ── ATR ratio (current ATR / 100-bar mean) ───────────────────
+    if "atr" in df.columns:
+        atr_ma100 = df["atr"].rolling(100, min_periods=10).mean()
+        df["atr_ratio"] = (df["atr"] / (atr_ma100 + 1e-10)).clip(0.3, 3.0)
+        df["atr_ratio"] = df["atr_ratio"].fillna(1.0)
+        new_feats.append("atr_ratio")
+
+    # ── CVD acceleration (2nd derivative) ────────────────────────
+    if cvd_col in df.columns:
+        cvd_vals = df[cvd_col].ffill()
+        df["cvd_accel"] = cvd_vals.diff().diff().fillna(0)
+        new_feats.append("cvd_accel")
+
+    # ── Temporal lags: p8_t-1, cvd_d_t-1, atr_ratio_t-1 ─────────
+    for src_col, lag_name in [("atr_ratio", "atr_ratio_lag1"),
+                               ("log_ret_1", "ret_lag1")]:
+        if src_col in df.columns:
+            df[lag_name] = df[src_col].shift(1).fillna(0)
+            new_feats.append(lag_name)
+
+    # ── Price / ATR ratio (normalized price) ──────────────────────
+    if price_col in df.columns and "atr" in df.columns:
+        atr_safe = df["atr"].replace(0, 1e-10)
+        df["price_atr"] = df[price_col] / atr_safe
+        new_feats.append("price_atr")
+
+    feature_list.extend(new_feats)
+    df[new_feats] = df[new_feats].fillna(0).replace([np.inf, -np.inf], 0)
+
 def prep_alpha(df: pd.DataFrame, btc_ref: pd.DataFrame = None):
     if btc_ref is not None:
         if "ts" in btc_ref.columns and "ts" in df.columns:
@@ -192,6 +248,7 @@ def prep_alpha(df: pd.DataFrame, btc_ref: pd.DataFrame = None):
             feats.extend([col, f"z_{col.replace(' ', '_').lower()}"])
             
     df[feats] = df[feats].fillna(0)
+    _add_advanced_features(df, feats)
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     df.fillna(0, inplace=True)
     return df, feats
@@ -256,6 +313,7 @@ def prep_trend(df: pd.DataFrame, btc_ref: pd.DataFrame = None):
             feats.extend([col, f"z_{col.replace(' ', '_').lower()}"])
 
     df[feats] = df[feats].fillna(0)
+    _add_advanced_features(df, feats)
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     df.fillna(0, inplace=True)
     return df, feats
@@ -377,6 +435,7 @@ def prep_vwap(df: pd.DataFrame, btc_ref: pd.DataFrame = None):
             df[f"z_{col.replace(' ', '_').lower()}"] = zscore(df[col], 10)
             feats.extend([col, f"z_{col.replace(' ', '_').lower()}"])
     df[feats] = df[feats].fillna(0).astype(np.float32)
+    _add_advanced_features(df, feats)
     df.replace([np.inf, -np.inf], np.nan, inplace=True)
     df.fillna(0, inplace=True)
     return df, feats
@@ -825,6 +884,7 @@ def prep_smc(df: pd.DataFrame, btc_ref: pd.DataFrame=None):
     atr_stretch = np.where(atr > 0, (c - ema_20) / atr_safe, 0.0)
     df = df.assign(bull_fvg=bull_fvg, bear_fvg=bear_fvg, bull_sweep=bull_sweep, bear_sweep=bear_sweep, atr=atr, delta=delta, z_delta=z_delta, z_cvd=z_cvd, atr_stretch=atr_stretch)
     feat_cols = ['bull_fvg', 'bear_fvg', 'bull_sweep', 'bear_sweep', 'delta', 'z_delta', 'z_cvd', 'atr_stretch']
+    _add_advanced_features(df, feat_cols)
     return (df, feat_cols)
 
 @njit(fastmath=True)
@@ -1440,6 +1500,188 @@ def train_all_strategies():
         os.replace(p_tmp, param_path)
 
     print("\n[SUCCESS] Live Model Training complete (Multi-Stage Optimized).")
+
+class OnlineModelUpdater:
+    """Incremental model updater using LightGBM refit().
+
+    Every `update_every_bars` (default 96 = ~24h of 15m candles),
+    the model is refit on the most recent `window_bars` candles.
+    This adapts to regime shifts without full retraining.
+
+    Usage in EnsembleStrategyPredictor._run_inference():
+        self.online_updater[symbol].on_new_candle(close, high, low, atr, features)
+    """
+    def __init__(self, symbol: str, model_dir: str = None,
+                 update_every_bars: int = 96,
+                 window_bars: int = 500,
+                 strategy_name: str = "Ensemble_6Strategy",
+                 label_horizon: int = 96):
+        self.symbol = symbol
+        self.strategy_name = strategy_name
+        self.update_every_bars = update_every_bars
+        self.window_bars = window_bars
+        self.label_horizon = label_horizon
+        self.model_dir = model_dir or os.path.join(
+            os.path.dirname(__file__), "models")
+        self.bars_since_update: int = 0
+        self._feature_buffer: deque = deque(maxlen=window_bars)
+        self._label_buffer: deque = deque(maxlen=window_bars)
+        self._model: Optional[lgb.Booster] = None
+        self._feature_cols: List[str] = []
+        
+        # Pending queue to compute labels after label_horizon bars
+        # List of dicts: {"close": float, "atr": float, "features": dict, "highs": List[float], "lows": List[float]}
+        self._pending_queue: List[dict] = []
+        
+        self._load_or_init_model()
+
+    def _load_or_init_model(self):
+        """Load existing model from disk or train from buffer."""
+        try:
+            path = os.path.join(
+                self.model_dir,
+                f"{self.strategy_name}_{self.symbol}_online_lgb.txt")
+            if os.path.exists(path):
+                self._model = lgb.Booster(model_file=path)
+                cols_path = path.replace("_lgb.txt", "_cols.json")
+                if os.path.exists(cols_path):
+                    with open(cols_path) as f:
+                        self._feature_cols = json.load(f)
+                log.info(f"[OnlineUpdater] Loaded existing model for "
+                         f"{self.symbol}: {len(self._feature_cols)} features")
+        except Exception as e:
+            log.warning(f"[OnlineUpdater] Could not load model: {e}")
+
+    def on_new_candle(self, close: float, high: float, low: float, atr: float, features: dict):
+        """Feed a new closed candle and resolve labels for older candles."""
+        # 1. Update all pending candles with the high/low of this new candle
+        for item in self._pending_queue:
+            item["highs"].append(high)
+            item["lows"].append(low)
+            
+        # 2. Add the new candle to the pending queue
+        self._pending_queue.append({
+            "close": close,
+            "atr": atr,
+            "features": features,
+            "highs": [],
+            "lows": []
+        })
+        
+        # 3. Check if the oldest candle in queue is now resolved (has label_horizon future bars)
+        while self._pending_queue and len(self._pending_queue[0]["highs"]) >= self.label_horizon:
+            oldest = self._pending_queue.pop(0)
+            label = self._calculate_triple_barrier_label(oldest)
+            
+            # Append features and label together to maintain alignment
+            self._feature_buffer.append(oldest["features"])
+            self._label_buffer.append(label)
+            
+            self.bars_since_update += 1
+            if self.bars_since_update >= self.update_every_bars:
+                self._refit()
+                self.bars_since_update = 0
+
+    def _calculate_triple_barrier_label(self, item: dict) -> int:
+        """Compute triple barrier label: 1 if TP hit first, else 0."""
+        close = item["close"]
+        atr = item["atr"]
+        if atr <= 0:
+            return 0
+            
+        tp_barrier = close + 2.0 * atr
+        sl_barrier = close - 1.0 * atr
+        
+        # Check highs and lows in future path
+        for h_val, l_val in zip(item["highs"], item["lows"]):
+            if h_val >= tp_barrier:
+                return 1
+            if l_val <= sl_barrier:
+                return 0
+        return 0  # Time exit / no barrier hit
+
+    def _refit(self):
+        """Refit the model on the in-memory buffer window."""
+        if len(self._feature_buffer) < 50:
+            return
+        if len(self._label_buffer) < 10:
+            return
+
+        X = pd.DataFrame(list(self._feature_buffer))
+        y = pd.Series(list(self._label_buffer))
+
+        # Align to same length
+        min_len = min(len(X), len(y))
+        X = X.iloc[-min_len:].reset_index(drop=True)
+        y = y.iloc[-min_len:].reset_index(drop=True)
+
+        # Keep only numeric features
+        self._feature_cols = [c for c in X.columns
+                              if pd.api.types.is_numeric_dtype(X[c])]
+        if len(self._feature_cols) < 2:
+            return
+
+        X_sub = X[self._feature_cols].astype(np.float32)
+        pos_weight = max(1, int((len(y) - y.sum()) / max(y.sum(), 1)))
+
+        try:
+            if self._model is not None:
+                # Incremental refit (keeps tree structure, updates leaves)
+                train_data = lgb.Dataset(
+                    X_sub, label=y,
+                    feature_name=self._feature_cols)
+                self._model = lgb.train(
+                    {'objective': 'binary', 'verbose': -1,
+                     'scale_pos_weight': pos_weight,
+                     'num_leaves': 31, 'learning_rate': 0.02,
+                     'max_depth': 4, 'min_child_samples': 10,
+                     'subsample': 0.8, 'colsample_bytree': 0.8,
+                     'reg_alpha': 0.1, 'n_jobs': 1},
+                    train_data,
+                    num_boost_round=20,
+                    init_model=self._model,
+                    keep_training_booster=True)
+            else:
+                # First train
+                train_data = lgb.Dataset(
+                    X_sub, label=y,
+                    feature_name=self._feature_cols)
+                self._model = lgb.train(
+                    {'objective': 'binary', 'verbose': -1,
+                     'scale_pos_weight': pos_weight,
+                     'num_leaves': 31, 'learning_rate': 0.03,
+                     'max_depth': 4, 'min_child_samples': 10,
+                     'n_jobs': 1},
+                    train_data,
+                    num_boost_round=50)
+
+            # Save to disk
+            path = os.path.join(
+                self.model_dir,
+                f"{self.strategy_name}_{self.symbol}_online_lgb.txt")
+            cols_path = path.replace("_lgb.txt", "_cols.json")
+            self._model.save_model(path)
+            with open(cols_path, 'w') as f:
+                json.dump(self._feature_cols, f)
+
+            log.info(f"[OnlineUpdater] {self.symbol}: refit on "
+                     f"{min_len} samples, {len(self._feature_cols)} features")
+        except Exception as e:
+            log.warning(f"[OnlineUpdater] {self.symbol}: refit failed — {e}")
+
+    def predict_proba(self, features: dict) -> Optional[float]:
+        """Get probability for a single feature dict."""
+        if self._model is None or not self._feature_cols:
+            return None
+        try:
+            X = pd.DataFrame([features])
+            for c in self._feature_cols:
+                if c not in X.columns:
+                    X[c] = 0.0
+            X_sub = X[self._feature_cols].astype(np.float32)
+            return float(self._model.predict(X_sub)[0])
+        except Exception:
+            return None
 
 if __name__ == "__main__":
     train_all_strategies()
