@@ -1128,12 +1128,98 @@ def simulate_trades_smc(symbol, df_smc, tp_mult=5, trail_atr=1.5):
             net_pnl, r_multiple, label, bars_held = simulate_trade_vwap_v2(h, l, c, i, entry, atr, best_dir, tp_mult, trail_atr, vwap)
             feats = {col: feat_arrs[col][i] for col in feat_cols}
             actual_entry_time = ts[i + 1] if i + 1 < len(ts) else ts[i]
-            flat_trade = {'symbol': symbol, 'entry_time': actual_entry_time, 'direction': best_dir, 'net_pnl': net_pnl, 'r_multiple': r_multiple, 'label': label}
-            flat_trade.update(feats)
-            trades['S6_SMC_Orderflow'].append(flat_trade)
-            cd = i + bars_held + 2
-        i += 1
-    return trades
+            train_df = df[train_mask]
+        else:
+            train_df = df.iloc[:train_end]
+
+        oos_df = df.iloc[oos_start:oos_end]
+
+        if len(train_df) < min_train_trades or len(oos_df) < 5:
+            continue
+
+        # ── Train model ──────────────────────────────────────────
+        m, cols = build_model_fast(train_df, **ml_params)
+        if m is None:
+            continue
+
+        # ── Predict on OOS ───────────────────────────────────────
+        preds = predict_model_fast(m, cols, oos_df)
+        high_conf = preds[preds['prob'] >= prob_threshold]
+        if len(high_conf) < 2:
+            continue
+
+        # ── Compute metrics ──────────────────────────────────────
+        r_series = high_conf['r_multiple'].values
+        win_r = r_series[r_series > 0]
+        loss_r = np.abs(r_series[r_series < 0])
+
+        oos_wr = len(win_r) / len(r_series) * 100
+        oos_avg_r = np.mean(r_series)
+        std_r = np.std(r_series) if len(r_series) > 1 else 1.0
+
+        # Sharpe (annualized, assuming 96 bars/day)
+        bars_per_year = 96 * 365
+        if std_r > 0:
+            oos_sharpe = (oos_avg_r / std_r) * np.sqrt(bars_per_year / len(r_series))
+        else:
+            oos_sharpe = 0.0
+
+        # Calmar = return / max drawdown
+        cum_r = np.cumsum(r_series)
+        peak = np.maximum.accumulate(cum_r)
+        dd = peak - cum_r
+        max_dd = np.max(dd) if len(dd) > 0 else 1.0
+        oos_calmar = cum_r[-1] / max_dd if max_dd > 0 else cum_r[-1]
+
+        # Sortino = return / downside deviation
+        downside = r_series[r_series < 0]
+        down_std = np.std(downside) if len(downside) > 1 else std_r
+        oos_sortino = (oos_avg_r / down_std) * np.sqrt(
+            bars_per_year / len(r_series)) if down_std > 0 else oos_sharpe
+
+        all_oos_r.extend(r_series.tolist())
+        per_window.append({
+            'window': w,
+            'n_train': len(train_df),
+            'n_oos': len(oos_df),
+            'n_trades': len(high_conf),
+            'wr': round(oos_wr, 1),
+            'avg_r': round(float(oos_avg_r), 3),
+            'sharpe': round(float(oos_sharpe), 3),
+            'calmar': round(float(oos_calmar), 3),
+            'sortino': round(float(oos_sortino), 3),
+            'total_r': round(float(np.sum(r_series)), 3),
+        })
+
+    if not all_oos_r:
+        return None
+
+    all_r = np.array(all_oos_r)
+    bars_per_year = 96 * 365
+    agg_std = np.std(all_r) if len(all_r) > 1 else 1.0
+    agg_sharpe = (np.mean(all_r) / agg_std) * np.sqrt(
+        bars_per_year / len(all_r)) if agg_std > 0 else 0.0
+    cum_all = np.cumsum(all_r)
+    peak_all = np.maximum.accumulate(cum_all)
+    dd_all = peak_all - cum_all
+    max_dd_all = np.max(dd_all) if len(dd_all) > 0 else 1.0
+    agg_calmar = cum_all[-1] / max_dd_all if max_dd_all > 0 else cum_all[-1]
+    agg_wr = sum(1 for r in all_r if r > 0) / len(all_r) * 100
+
+    down_r = all_r[all_r < 0]
+    down_std = np.std(down_r) if len(down_r) > 1 else agg_std
+    agg_sortino = (np.mean(all_r) / down_std) * np.sqrt(
+        bars_per_year / len(all_r)) if down_std > 0 else agg_sharpe
+
+    return {
+        'oos_sharpe': round(float(agg_sharpe), 3),
+        'oos_calmar': round(float(agg_calmar), 3),
+        'oos_sortino': round(float(agg_sortino), 3),
+        'oos_wr': round(float(agg_wr), 1),
+        'oos_avg_r': round(float(np.mean(all_r)), 3),
+        'oos_trades': len(all_r),
+        'windows': per_window,
+    }
 
 def train_all_strategies():
     print("=" * 60)
@@ -1296,31 +1382,22 @@ def train_all_strategies():
                     else:
                         filt_df = pd.DataFrame()
                         
-                    if len(filt_df) < 10: return -999.0
-                    
-                    split_idx = int(len(filt_df) * 0.7)
-                    train_part = filt_df.iloc[:split_idx]
-                    test_part = filt_df.iloc[split_idx:]
-                    if len(train_part) < 5 or len(test_part) < 2: return -999.0
-                    
-                    m, cols = build_model_fast(train_part, **m_param)
-                    if m is None: return -999.0
-                    
-                    preds = predict_model_fast(m, cols, test_part)
+                    if len(filt_df) < 30: return -999.0
                     
                     local_best = -999.0
                     for prob in prob_thresholds:
-                        high_conf = preds[preds['prob'] >= prob]
-                        if len(high_conf) < 2: continue
-                        km = 0.5 + np.clip((high_conf['prob'] - 0.5) * 2.0, 0.0, 1.0)
-                        high_conf = high_conf.copy()
-                        high_conf['adj_pnl'] = high_conf['net_pnl'] * km
-                        wr = (sum(high_conf['adj_pnl'] > 0) / len(high_conf)) * 100
-                        pnl = high_conf['adj_pnl'].sum()
-                        score = (pnl * wr) / 100.0
-                        if score > local_best:
-                            local_best = score
-                            
+                        res = walk_forward_evaluate(
+                            filt_df,
+                            n_windows=5,
+                            embargo_bars=96,
+                            min_train_trades=10,
+                            ml_params=m_param,
+                            prob_threshold=prob
+                        )
+                        if res is not None:
+                            score = res['oos_sharpe']
+                            if score > local_best:
+                                local_best = score
                     return local_best
 
                 study = optuna.create_study(direction='maximize', sampler=optuna.samplers.TPESampler(seed=42))
@@ -1369,20 +1446,18 @@ def train_all_strategies():
                     else:
                         filt_df = pd.DataFrame()
                     
-                    split_idx = int(len(filt_df) * 0.7)
-                    train_part = filt_df.iloc[:split_idx]
-                    test_part = filt_df.iloc[split_idx:]
-                    m, cols = build_model_fast(train_part, **best_m_params)
-                    if m is not None:
-                        preds = predict_model_fast(m, cols, test_part)
-                        best_local = -999.0
-                        for prob in prob_thresholds:
-                            hc = preds[preds['prob'] >= prob]
-                            if len(hc) < 2: continue
-                            km = 0.5 + np.clip((hc['prob'] - 0.5) * 2.0, 0.0, 1.0)
-                            hc = hc.copy()
-                            hc['adj_pnl'] = hc['net_pnl'] * km
-                            score = hc['adj_pnl'].sum() * (sum(hc['adj_pnl'] > 0) / len(hc))
+                    best_local = -999.0
+                    for prob in prob_thresholds:
+                        res = walk_forward_evaluate(
+                            filt_df,
+                            n_windows=5,
+                            embargo_bars=96,
+                            min_train_trades=10,
+                            ml_params=best_m_params,
+                            prob_threshold=prob
+                        )
+                        if res is not None:
+                            score = res['oos_sharpe']
                             if score > best_local:
                                 best_local = score
                                 best_prob = prob

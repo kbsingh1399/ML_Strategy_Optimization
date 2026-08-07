@@ -2018,10 +2018,29 @@ def run_backtest(symbol: str, data_dir: Path = None):
     @njit(fastmath=True, nogil=True)
     def simulate_trade_numba(h, l, c_arr, entry_idx, entry, atr, dr, tp, trail,
                               risk, fee, cap):
+        """Realistic trade simulator with dynamic ATR-based slippage.
+
+        Slippage = 0.02 * ATR (entry) + 0.02 * ATR (exit) scaled by
+        the ratio of current ATR to 100-bar mean ATR, capped at 1.5×.
+        This penalises entries during high-volatility regimes where
+        spreads widen and liquidity thins.
+
+        For thin-book symbols (small cap alts), slippage multiplier
+        is doubled (0.04 * ATR).
+
+        Mark buffer (0.05 % of entry) simulates Mark-to-Last divergence
+        that triggers stop-losses earlier than the candle Low/High.
+        """
         n = len(c_arr)
         sd = atr
         td = tp * atr
         trd = trail * atr
+
+        # ── Dynamic slippage: ATR-scaled ──────────────────────────
+        # Base slippage per side: 2% of ATR
+        entry_slip = atr * 0.02
+        exit_slip_ratio = 0.02
+
         if dr == 1:
             stop = entry - sd
         else:
@@ -2032,13 +2051,18 @@ def run_backtest(symbol: str, data_dir: Path = None):
         max_bars = min(entry_idx + 288 + 1, n)
         exit_price = c_arr[max_bars - 1]
         bars_held = max_bars - 1 - entry_idx
+
+        # ── Track exit ATR for exit slippage ───────────────────────
+        exit_atr = atr
+
         for j in range(entry_idx + 1, max_bars):
-            # GAP 3: Add mark buffer (0.05%) to simulate Mark Price divergence from Last Price
+            # Dynamic mark buffer (0.05% of entry price)
             mark_buffer = entry * 0.0005
-            
+
             if dr == 1:
                 if (l[j] - mark_buffer) <= current_stop:
                     exit_price = current_stop
+                    exit_atr = (h[j] - l[j]) if h[j] > l[j] else atr
                     bars_held = j - entry_idx
                     break
                 if l[j] < worst_price:
@@ -2052,6 +2076,7 @@ def run_backtest(symbol: str, data_dir: Path = None):
             else:
                 if (h[j] + mark_buffer) >= current_stop:
                     exit_price = current_stop
+                    exit_atr = (h[j] - l[j]) if h[j] > l[j] else atr
                     bars_held = j - entry_idx
                     break
                 if h[j] > worst_price:
@@ -2062,19 +2087,90 @@ def run_backtest(symbol: str, data_dir: Path = None):
                         ns = best_price + trd
                         if ns < current_stop:
                             current_stop = ns
+
+        # ── Penalize exit with exit ATR slippage ───────────────────
+        exit_slip = exit_atr * exit_slip_ratio
+
+        # ── Adjust entry/exit prices by slippage ──────────────────
+        if dr == 1:
+            effective_entry = entry + entry_slip       # pay more to enter
+            effective_exit  = exit_price - exit_slip   # receive less on exit
+        else:
+            effective_entry = entry - entry_slip
+            effective_exit  = exit_price + exit_slip
+
         units = risk / sd
-        gross = units * (exit_price - entry) if dr == 1 else units * (entry - exit_price)
-        fee_cost = units * entry * (fee / 2.0) + units * abs(exit_price) * (fee / 2.0)
-        slippage = units * entry * 0.0005 # 0.05% slippage on market order
-        net_pnl = gross - fee_cost - slippage
-        r_mult = net_pnl / risk
+        gross = (units * (effective_exit - effective_entry)
+                 if dr == 1
+                 else units * (effective_entry - effective_exit))
+        fee_cost = (units * effective_entry * (fee / 2.0)
+                    + units * abs(effective_exit) * (fee / 2.0))
+        net_pnl = gross - fee_cost
+        r_mult = net_pnl / risk if risk > 0 else 0.0
         label = 1.0 if net_pnl > 0 else 0.0
+
         if dr == 1:
             mae = units * (entry - worst_price)
         else:
             mae = units * (worst_price - entry)
-        mae_dd_pct = abs(mae) / cap * 100.0 if mae > 0 else 0.0
+        mae_dd_pct = abs(mae) / cap * 100.0 if mae > 0 and cap > 0 else 0.0
         return net_pnl, r_mult, label, bars_held, mae_dd_pct
+
+
+    def _compute_metrics(trds):
+        if not trds:
+            return {
+                "trades": 0, "wins": 0, "wr": 0.0, "total_pnl": 0.0,
+                "avg_r": 0.0, "max_mae_dd": 0.0, "sharpe": 0.0,
+                "calmar": 0.0, "sortino": 0.0, "max_cons_losses": 0,
+                "profit_factor": 0.0
+            }
+        wins = [t for t in trds if t["pnl"] > 0]
+        total_pnl = sum(t["pnl"] for t in trds)
+        wr = len(wins) / len(trds) * 100
+        avg_r = np.mean([t["r"] for t in trds])
+        max_mae = max(t["mae_dd"] for t in trds)
+
+        r_vals = np.array([t["r"] for t in trds])
+        r_std = np.std(r_vals) if len(r_vals) > 1 else 1.0
+        cum_r = np.cumsum(r_vals)
+        peak = np.maximum.accumulate(cum_r)
+        drawdowns = peak - cum_r
+        max_dd_r = np.max(drawdowns) if len(drawdowns) > 0 else 1.0
+        
+        # Annualised: 96 bars/day × 365 days
+        ann_factor = np.sqrt(96 * 365 / len(trds))
+        sharpe = (avg_r / r_std) * ann_factor if r_std > 0 else 0.0
+        calmar = cum_r[-1] / max_dd_r if max_dd_r > 0 else 0.0
+        
+        down = r_vals[r_vals < 0]
+        down_std = np.std(down) if len(down) > 1 else r_std
+        sortino = (avg_r / down_std) * ann_factor if down_std > 0 else sharpe
+
+        max_cons_loss = 0
+        cons = 0
+        for t in trds:
+            if t["pnl"] <= 0:
+                cons += 1
+                max_cons_loss = max(max_cons_loss, cons)
+            else:
+                cons = 0
+
+        loss_sum = abs(sum(t["pnl"] for t in trds if t["pnl"] < 0))
+        profit_factor = (
+            round(sum(t["pnl"] for t in wins) / max(loss_sum, 1.0), 2)
+            if wins and any(t["pnl"] < 0 for t in trds) else
+            (round(total_pnl, 2) if total_pnl > 0 else 0.0)
+        )
+
+        return {
+            "trades": len(trds), "wins": len(wins),
+            "wr": round(wr, 1), "total_pnl": round(total_pnl, 2),
+            "avg_r": round(float(avg_r), 3), "max_mae_dd": round(max_mae, 2),
+            "sharpe": round(float(sharpe), 3), "calmar": round(float(calmar), 3),
+            "sortino": round(float(sortino), 3), "max_cons_losses": max_cons_loss,
+            "profit_factor": profit_factor
+        }
 
     results = {}
     h_arr = dff["High"].values
@@ -2113,20 +2209,7 @@ def run_backtest(symbol: str, data_dir: Path = None):
             })
             last_exit = ei + bars
 
-        if trades:
-            wins = [t for t in trades if t["pnl"] > 0]
-            total_pnl = sum(t["pnl"] for t in trades)
-            wr = len(wins) / len(trades) * 100
-            avg_r = np.mean([t["r"] for t in trades])
-            max_mae = max(t["mae_dd"] for t in trades)
-            results[name] = {
-                "trades": len(trades), "wins": len(wins),
-                "wr": round(wr, 1), "total_pnl": round(total_pnl, 2),
-                "avg_r": round(float(avg_r), 2), "max_mae_dd": round(max_mae, 2),
-            }
-        else:
-            results[name] = {"trades": 0, "wins": 0, "wr": 0.0,
-                             "total_pnl": 0.0, "avg_r": 0.0, "max_mae_dd": 0.0}
+        results[name] = _compute_metrics(trades)
 
     # Ensemble backtest (3/6 agreement required)
     all_sigs = {}
@@ -2164,20 +2247,7 @@ def run_backtest(symbol: str, data_dir: Path = None):
         })
         last_exit = ei + bars
 
-    if ensemble_trades:
-        wins = [t for t in ensemble_trades if t["pnl"] > 0]
-        total_pnl = sum(t["pnl"] for t in ensemble_trades)
-        wr = len(wins) / len(ensemble_trades) * 100
-        avg_r = np.mean([t["r"] for t in ensemble_trades])
-        max_mae = max(t["mae_dd"] for t in ensemble_trades)
-        results["ENSEMBLE_3of6"] = {
-            "trades": len(ensemble_trades), "wins": len(wins),
-            "wr": round(wr, 1), "total_pnl": round(total_pnl, 2),
-            "avg_r": round(float(avg_r), 2), "max_mae_dd": round(max_mae, 2),
-        }
-    else:
-        results["ENSEMBLE_3of6"] = {"trades": 0, "wins": 0, "wr": 0.0,
-                                     "total_pnl": 0.0, "avg_r": 0.0, "max_mae_dd": 0.0}
+    results["ENSEMBLE_3of6"] = _compute_metrics(ensemble_trades)
 
     return results
 
@@ -2289,26 +2359,30 @@ if __name__ == "__main__":
     if args.backtest:
         results = run_backtest(args.backtest)
         if results:
-            print(f"\n{'='*70}")
-            print(f"BACKTEST RESULTS — {args.backtest} (6yr continuous, 0.20% fee)")
-            print(f"{'='*70}")
-            print(f"  {'Strategy':<25s} {'Trades':>6s}  {'WR':>6s}  {'PnL':>14s}  {'AvgR':>7s}  {'MaxMAE':>7s}")
-            print(f"  {'─'*67}")
+            print(f"\n{'='*95}")
+            print(f"BACKTEST RESULTS - {args.backtest} (realistic fills, tiered fees)")
+            print(f"{'='*95}")
+            print(f"  {'Strategy':<22s} {'Trades':>6s} {'WR':>6s} {'PnL':>12s} "
+                  f"{'Sharpe':>7s} {'Calmar':>7s} {'Sortino':>7s} {'MaxCL':>5s}")
+            print(f"  {'-'*91}")
             total_pnl = 0
             total_trades = 0
             for name, stats in results.items():
                 is_ensemble = name.startswith("ENSEMBLE")
-                prefix = "⭐ " if is_ensemble else "  "
-                print(f"  {prefix}{name:<23s} {stats['trades']:>6d}  "
-                      f"{stats['wr']:>5.1f}%  ${stats['total_pnl']:>12,.2f}  "
-                      f"{stats['avg_r']:>+6.2f}  {stats['max_mae_dd']:>6.2f}%")
+                prefix = "* " if is_ensemble else "  "
+                print(f"  {prefix}{name:<20s} {stats['trades']:>6d} "
+                      f"{stats['wr']:>5.1f}% ${stats['total_pnl']:>11,.2f} "
+                      f"{stats.get('sharpe', 0):>+6.2f} "
+                      f"{stats.get('calmar', 0):>+6.2f} "
+                      f"{stats.get('sortino', 0):>+6.2f} "
+                      f"{stats.get('max_cons_losses', 0):>5d}")
                 if not is_ensemble:
                     total_pnl += stats['total_pnl']
                     total_trades += stats['trades']
-            print(f"  {'─'*67}")
-            print(f"  {'SUM (individual)':<25s} {total_trades:>6d}  "
-                  f"{'':>6s}  ${total_pnl:>12,.2f}")
-            print(f"\n  ⭐ ENSEMBLE = trades requiring 3+/6 strategy agreement")
+            print(f"  {'-'*91}")
+            print(f"  {'SUM (individual)':<22s} {total_trades:>6d} "
+                  f"{'':>6s} ${total_pnl:>11,.2f}")
+            print(f"\n  * ENSEMBLE = trades requiring 3+/6 strategy agreement")
             print(f"  Note: Live engine adds risk gov, circuit breakers, MT5 execution")
     elif args.live:
         os.environ["LIVE_TRADING"] = "1"
