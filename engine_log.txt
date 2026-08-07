@@ -1005,3 +1005,255 @@
 ============================================================
 [2026-08-08 02:04:00,112] [INFO] SMOKE TEST COMPLETE — All systems operational
 [2026-08-08 02:04:00,112] [INFO] ============================================================
+[2026-08-08 02:04:58,694] [INFO] Loaded ensemble_strategy_predictor module
+[2026-08-08 02:04:58,697] [INFO] ============================================================
+[2026-08-08 02:04:58,697] [INFO] ENGINE_1 SMOKE TEST
+[2026-08-08 02:04:58,697] [INFO] ============================================================
+[2026-08-08 02:04:58,697] [INFO] 
+[1/5] Testing signal functions...
+[2026-08-08 02:04:58,697] [INFO] [OrderFlow] BTCUSDT: initialized (levels=5, spoof_lookback=2.0s)
+[2026-08-08 02:04:58,697] [INFO] [OrderFlow] ETHUSDT: initialized (levels=5, spoof_lookback=2.0s)
+[2026-08-08 02:05:00,040] [INFO] EnsembleStrategyPredictor initialized for 2 symbols
+[2026-08-08 02:05:00,040] [INFO] Active Strategies (7/7): ['S1_Liquidation', 'S2_CVD_Momentum', 'S3_Trend_Follow', 'S4_Mean_Reversion', 'S5_Vol_Expansion', 'S6_OI_Momentum', 'S7_CVD_Divergence']
+[2026-08-08 02:05:00,040] [INFO] Config: min_confidence=0.45, min_agreeing=3
+[2026-08-08 02:05:00,040] [INFO] Warm-up gate active — requires 200 bars + 30s live ticks
+[2026-08-08 02:05:00,095] [INFO] 
+[2/5] Testing backtest on BTCUSDT...
+[2026-08-08 02:05:00,095] [INFO] Running backtest for BTCUSDT...
+[2026-08-08 02:05:02,166] [INFO]   S1_Liquidation: 27 trades, WR=48.1%, PnL=$785.51
+[2026-08-08 02:05:02,166] [INFO]   S2_CVD_Momentum: 1849 trades, WR=22.1%, PnL=$6,580.12
+[2026-08-08 02:05:02,166] [INFO]   S3_Trend_Follow: 2183 trades, WR=22.4%, PnL=$8,763.27
+[2026-08-08 02:05:02,166] [INFO]   S4_Mean_Reversion: 1642 trades, WR=22.1%, PnL=$6,523.40
+[2026-08-08 02:05:02,167] [INFO]   S5_Vol_Expansion: 1845 trades, WR=24.0%, PnL=$10,590.46
+[2026-08-08 02:05:02,167] [INFO]   S6_OI_Momentum: 2558 trades, WR=21.7%, PnL=$8,060.56
+[2026-08-08 02:05:02,167] [INFO]   S7_CVD_Divergence: 101 trades, WR=42.6%, PnL=$2,836.13
+[2026-08-08 02:05:02,167] [INFO]   ENSEMBLE_3of6: 1708 trades, WR=22.0%, PnL=$6,326.16
+[2026-08-08 02:05:02,167] [INFO] 
+[3/5] Testing trade tracker...
+[2026-08-08 02:05:02,191] [INFO] BinanceBroker initialized (dry_run=True, testnet=True, base_url=https://testnet.binancefuture.com)
+[2026-08-08 02:05:02,487] [INFO] [Binance] Connected. Server time offset: 2755ms
+[2026-08-08 02:05:02,960] [INFO] [Binance] Loaded rules for 731 contracts, 570 active perpetuals.
+[2026-08-08 02:05:02,961] [INFO] Binance Broker initialized (live=False)
+[2026-08-08 02:05:02,961] [INFO] [History] Restored consecutive-loss counter: 3 from saved trades
+[2026-08-08 02:05:02,962] [INFO] Daily rollover: start capital = $5138.68
+[2026-08-08 02:05:02,962] [INFO]   After trade: trades=24, capital=$5,138.68
+[2026-08-08 02:05:02,962] [INFO] 
+[4/5] Testing snapshot store...
+[2026-08-08 02:05:02,963] [INFO]   BTCUSDT price: $65,000.00
+[2026-08-08 02:05:02,963] [INFO] 
+[5/5] Testing ensemble aggregator...
+[2026-08-08 02:05:02,963] [INFO]   Direction=1, Confidence=0.69, Agreeing=4/6, Should Enter=True
+[2026-08-08 02:05:02,963] [INFO] 
+============================================================
+[2026-08-08 02:05:02,963] [INFO] SMOKE TEST COMPLETE — All systems operational
+[2026-08-08 02:05:02,963] [INFO] ============================================================
+[2026-08-08 02:05:35,833] [INFO] Loaded ensemble_strategy_predictor module
+[2026-08-08 02:05:35,836] [INFO] ============================================================
+[2026-08-08 02:05:35,836] [INFO] ENGINE_1 SMOKE TEST
+[2026-08-08 02:05:35,836] [INFO] ============================================================
+[2026-08-08 02:05:35,836] [INFO] 
+[1/5] Testing signal functions...
+[2026-08-08 02:05:35,837] [INFO] [OrderFlow] BTCUSDT: initialized (levels=5, spoof_lookback=2.0s)
+[2026-08-08 02:05:35,837] [INFO] [OrderFlow] ETHUSDT: initialized (levels=5, spoof_lookback=2.0s)
+[2026-08-08 02:05:37,088] [INFO] EnsembleStrategyPredictor initialized for 2 symbols
+[2026-08-08 02:05:37,088] [INFO] Active Strategies (7/7): ['S1_Liquidation', 'S2_CVD_Momentum', 'S3_Trend_Follow', 'S4_Mean_Reversion', 'S5_Vol_Expansion', 'S6_OI_Momentum', 'S7_CVD_Divergence']
+[2026-08-08 02:05:37,088] [INFO] Config: min_confidence=0.45, min_agreeing=3
+[2026-08-08 02:05:37,088] [INFO] Warm-up gate active — requires 200 bars + 30s live ticks
+[2026-08-08 02:05:37,131] [INFO] 
+[2/5] Testing backtest on BTCUSDT...
+[2026-08-08 02:05:37,132] [INFO] Running backtest for BTCUSDT...
+[2026-08-08 02:05:38,521] [INFO]   S1_Liquidation: 27 trades, WR=48.1%, PnL=$785.51
+[2026-08-08 02:05:38,521] [INFO]   S2_CVD_Momentum: 1849 trades, WR=22.1%, PnL=$6,580.12
+[2026-08-08 02:05:38,521] [INFO]   S3_Trend_Follow: 2183 trades, WR=22.4%, PnL=$8,763.27
+[2026-08-08 02:05:38,521] [INFO]   S4_Mean_Reversion: 1642 trades, WR=22.1%, PnL=$6,523.40
+[2026-08-08 02:05:38,521] [INFO]   S5_Vol_Expansion: 1845 trades, WR=24.0%, PnL=$10,590.46
+[2026-08-08 02:05:38,521] [INFO]   S6_OI_Momentum: 2558 trades, WR=21.7%, PnL=$8,060.56
+[2026-08-08 02:05:38,521] [INFO]   S7_CVD_Divergence: 101 trades, WR=42.6%, PnL=$2,836.13
+[2026-08-08 02:05:38,521] [INFO]   ENSEMBLE_3of6: 1708 trades, WR=22.0%, PnL=$6,326.16
+[2026-08-08 02:05:38,521] [INFO] 
+[3/5] Testing trade tracker...
+[2026-08-08 02:05:38,536] [INFO] BinanceBroker initialized (dry_run=True, testnet=True, base_url=https://testnet.binancefuture.com)
+[2026-08-08 02:05:38,783] [INFO] [Binance] Connected. Server time offset: 2755ms
+[2026-08-08 02:05:39,671] [INFO] [Binance] Loaded rules for 731 contracts, 570 active perpetuals.
+[2026-08-08 02:05:39,672] [INFO] Binance Broker initialized (live=False)
+[2026-08-08 02:05:39,672] [INFO] [History] Restored consecutive-loss counter: 3 from saved trades
+[2026-08-08 02:05:39,672] [INFO] Daily rollover: start capital = $5138.68
+[2026-08-08 02:05:39,672] [INFO]   After trade: trades=24, capital=$5,138.68
+[2026-08-08 02:05:39,672] [INFO] 
+[4/5] Testing snapshot store...
+[2026-08-08 02:05:39,674] [INFO]   BTCUSDT price: $65,000.00
+[2026-08-08 02:05:39,674] [INFO] 
+[5/5] Testing ensemble aggregator...
+[2026-08-08 02:05:39,674] [INFO]   Direction=1, Confidence=0.69, Agreeing=4/6, Should Enter=True
+[2026-08-08 02:05:39,674] [INFO] 
+============================================================
+[2026-08-08 02:05:39,674] [INFO] SMOKE TEST COMPLETE — All systems operational
+[2026-08-08 02:05:39,674] [INFO] ============================================================
+[2026-08-08 02:07:02,846] [INFO] Loaded ensemble_strategy_predictor module
+[2026-08-08 02:07:02,849] [INFO] ============================================================
+[2026-08-08 02:07:02,849] [INFO] ENGINE_1 SMOKE TEST
+[2026-08-08 02:07:02,849] [INFO] ============================================================
+[2026-08-08 02:07:02,849] [INFO] 
+[1/5] Testing signal functions...
+[2026-08-08 02:07:02,850] [INFO] [OrderFlow] BTCUSDT: initialized (levels=5, spoof_lookback=2.0s)
+[2026-08-08 02:07:02,850] [INFO] [OrderFlow] ETHUSDT: initialized (levels=5, spoof_lookback=2.0s)
+[2026-08-08 02:07:04,099] [INFO] EnsembleStrategyPredictor initialized for 2 symbols
+[2026-08-08 02:07:04,099] [INFO] Active Strategies (7/7): ['S1_Liquidation', 'S2_CVD_Momentum', 'S3_Trend_Follow', 'S4_Mean_Reversion', 'S5_Vol_Expansion', 'S6_OI_Momentum', 'S7_CVD_Divergence']
+[2026-08-08 02:07:04,099] [INFO] Config: min_confidence=0.45, min_agreeing=3
+[2026-08-08 02:07:04,099] [INFO] Warm-up gate active — requires 200 bars + 30s live ticks
+[2026-08-08 02:07:04,143] [INFO] 
+[2/5] Testing backtest on BTCUSDT...
+[2026-08-08 02:07:04,143] [INFO] Running backtest for BTCUSDT...
+[2026-08-08 02:07:05,537] [INFO]   S1_Liquidation: 27 trades, WR=48.1%, PnL=$785.51
+[2026-08-08 02:07:05,537] [INFO]   S2_CVD_Momentum: 1849 trades, WR=22.1%, PnL=$6,580.12
+[2026-08-08 02:07:05,537] [INFO]   S3_Trend_Follow: 2183 trades, WR=22.4%, PnL=$8,763.27
+[2026-08-08 02:07:05,537] [INFO]   S4_Mean_Reversion: 1642 trades, WR=22.1%, PnL=$6,523.40
+[2026-08-08 02:07:05,537] [INFO]   S5_Vol_Expansion: 1845 trades, WR=24.0%, PnL=$10,590.46
+[2026-08-08 02:07:05,537] [INFO]   S6_OI_Momentum: 2558 trades, WR=21.7%, PnL=$8,060.56
+[2026-08-08 02:07:05,537] [INFO]   S7_CVD_Divergence: 101 trades, WR=42.6%, PnL=$2,836.13
+[2026-08-08 02:07:05,537] [INFO]   ENSEMBLE_3of6: 1708 trades, WR=22.0%, PnL=$6,326.16
+[2026-08-08 02:07:05,537] [INFO] 
+[3/5] Testing trade tracker...
+[2026-08-08 02:07:05,550] [INFO] BinanceBroker initialized (dry_run=True, testnet=True, base_url=https://testnet.binancefuture.com)
+[2026-08-08 02:07:05,826] [INFO] [Binance] Connected. Server time offset: 2753ms
+[2026-08-08 02:07:06,298] [INFO] [Binance] Loaded rules for 731 contracts, 570 active perpetuals.
+[2026-08-08 02:07:06,299] [INFO] Binance Broker initialized (live=False)
+[2026-08-08 02:07:06,300] [INFO] [History] Restored consecutive-loss counter: 3 from saved trades
+[2026-08-08 02:07:06,300] [INFO] Daily rollover: start capital = $5138.68
+[2026-08-08 02:07:06,300] [INFO]   After trade: trades=24, capital=$5,138.68
+[2026-08-08 02:07:06,300] [INFO] 
+[4/5] Testing snapshot store...
+[2026-08-08 02:07:06,301] [INFO]   BTCUSDT price: $65,000.00
+[2026-08-08 02:07:06,302] [INFO] 
+[5/5] Testing ensemble aggregator...
+[2026-08-08 02:07:06,302] [INFO]   Direction=1, Confidence=0.69, Agreeing=4/6, Should Enter=True
+[2026-08-08 02:07:06,302] [INFO] 
+============================================================
+[2026-08-08 02:07:06,302] [INFO] SMOKE TEST COMPLETE — All systems operational
+[2026-08-08 02:07:06,302] [INFO] ============================================================
+[2026-08-08 02:07:29,763] [INFO] Loaded ensemble_strategy_predictor module
+[2026-08-08 02:07:29,766] [INFO] ============================================================
+[2026-08-08 02:07:29,766] [INFO] ENGINE_1 SMOKE TEST
+[2026-08-08 02:07:29,766] [INFO] ============================================================
+[2026-08-08 02:07:29,766] [INFO] 
+[1/5] Testing signal functions...
+[2026-08-08 02:07:29,766] [INFO] [OrderFlow] BTCUSDT: initialized (levels=5, spoof_lookback=2.0s)
+[2026-08-08 02:07:29,766] [INFO] [OrderFlow] ETHUSDT: initialized (levels=5, spoof_lookback=2.0s)
+[2026-08-08 02:07:31,014] [INFO] EnsembleStrategyPredictor initialized for 2 symbols
+[2026-08-08 02:07:31,014] [INFO] Active Strategies (7/7): ['S1_Liquidation', 'S2_CVD_Momentum', 'S3_Trend_Follow', 'S4_Mean_Reversion', 'S5_Vol_Expansion', 'S6_OI_Momentum', 'S7_CVD_Divergence']
+[2026-08-08 02:07:31,014] [INFO] Config: min_confidence=0.45, min_agreeing=3
+[2026-08-08 02:07:31,014] [INFO] Warm-up gate active — requires 200 bars + 30s live ticks
+[2026-08-08 02:07:31,063] [INFO] 
+[2/5] Testing backtest on BTCUSDT...
+[2026-08-08 02:07:31,064] [INFO] Running backtest for BTCUSDT...
+[2026-08-08 02:07:32,518] [INFO]   S1_Liquidation: 27 trades, WR=48.1%, PnL=$785.51
+[2026-08-08 02:07:32,518] [INFO]   S2_CVD_Momentum: 1849 trades, WR=22.1%, PnL=$6,580.12
+[2026-08-08 02:07:32,518] [INFO]   S3_Trend_Follow: 2183 trades, WR=22.4%, PnL=$8,763.27
+[2026-08-08 02:07:32,518] [INFO]   S4_Mean_Reversion: 1642 trades, WR=22.1%, PnL=$6,523.40
+[2026-08-08 02:07:32,518] [INFO]   S5_Vol_Expansion: 1845 trades, WR=24.0%, PnL=$10,590.46
+[2026-08-08 02:07:32,518] [INFO]   S6_OI_Momentum: 2558 trades, WR=21.7%, PnL=$8,060.56
+[2026-08-08 02:07:32,518] [INFO]   S7_CVD_Divergence: 101 trades, WR=42.6%, PnL=$2,836.13
+[2026-08-08 02:07:32,518] [INFO]   ENSEMBLE_3of6: 1708 trades, WR=22.0%, PnL=$6,326.16
+[2026-08-08 02:07:32,518] [INFO] 
+[3/5] Testing trade tracker...
+[2026-08-08 02:07:32,532] [INFO] BinanceBroker initialized (dry_run=True, testnet=True, base_url=https://testnet.binancefuture.com)
+[2026-08-08 02:07:32,776] [INFO] [Binance] Connected. Server time offset: 2753ms
+[2026-08-08 02:07:33,462] [INFO] [Binance] Loaded rules for 731 contracts, 570 active perpetuals.
+[2026-08-08 02:07:33,463] [INFO] Binance Broker initialized (live=False)
+[2026-08-08 02:07:33,463] [INFO] [History] Restored consecutive-loss counter: 3 from saved trades
+[2026-08-08 02:07:33,463] [INFO] Daily rollover: start capital = $5138.68
+[2026-08-08 02:07:33,464] [INFO]   After trade: trades=24, capital=$5,138.68
+[2026-08-08 02:07:33,464] [INFO] 
+[4/5] Testing snapshot store...
+[2026-08-08 02:07:33,465] [INFO]   BTCUSDT price: $65,000.00
+[2026-08-08 02:07:33,465] [INFO] 
+[5/5] Testing ensemble aggregator...
+[2026-08-08 02:07:33,465] [INFO]   Direction=1, Confidence=0.69, Agreeing=4/6, Should Enter=True
+[2026-08-08 02:07:33,465] [INFO] 
+============================================================
+[2026-08-08 02:07:33,465] [INFO] SMOKE TEST COMPLETE — All systems operational
+[2026-08-08 02:07:33,465] [INFO] ============================================================
+[2026-08-08 02:08:56,441] [INFO] Loaded ensemble_strategy_predictor module
+[2026-08-08 02:08:56,444] [INFO] ============================================================
+[2026-08-08 02:08:56,444] [INFO] ENGINE_1 SMOKE TEST
+[2026-08-08 02:08:56,444] [INFO] ============================================================
+[2026-08-08 02:08:56,444] [INFO] 
+[1/5] Testing signal functions...
+[2026-08-08 02:08:56,445] [INFO] [OrderFlow] BTCUSDT: initialized (levels=5, spoof_lookback=2.0s)
+[2026-08-08 02:08:56,445] [INFO] [OrderFlow] ETHUSDT: initialized (levels=5, spoof_lookback=2.0s)
+[2026-08-08 02:08:57,665] [INFO] EnsembleStrategyPredictor initialized for 2 symbols
+[2026-08-08 02:08:57,665] [INFO] Active Strategies (7/7): ['S1_Liquidation', 'S2_CVD_Momentum', 'S3_Trend_Follow', 'S4_Mean_Reversion', 'S5_Vol_Expansion', 'S6_OI_Momentum', 'S7_CVD_Divergence']
+[2026-08-08 02:08:57,665] [INFO] Config: min_confidence=0.45, min_agreeing=3
+[2026-08-08 02:08:57,665] [INFO] Warm-up gate active — requires 200 bars + 30s live ticks
+[2026-08-08 02:08:57,707] [INFO] 
+[2/5] Testing backtest on BTCUSDT...
+[2026-08-08 02:08:57,707] [INFO] Running backtest for BTCUSDT...
+[2026-08-08 02:08:59,122] [INFO]   S1_Liquidation: 27 trades, WR=48.1%, PnL=$785.51
+[2026-08-08 02:08:59,122] [INFO]   S2_CVD_Momentum: 1849 trades, WR=22.1%, PnL=$6,580.12
+[2026-08-08 02:08:59,122] [INFO]   S3_Trend_Follow: 2183 trades, WR=22.4%, PnL=$8,763.27
+[2026-08-08 02:08:59,122] [INFO]   S4_Mean_Reversion: 1642 trades, WR=22.1%, PnL=$6,523.40
+[2026-08-08 02:08:59,122] [INFO]   S5_Vol_Expansion: 1845 trades, WR=24.0%, PnL=$10,590.46
+[2026-08-08 02:08:59,122] [INFO]   S6_OI_Momentum: 2558 trades, WR=21.7%, PnL=$8,060.56
+[2026-08-08 02:08:59,122] [INFO]   S7_CVD_Divergence: 101 trades, WR=42.6%, PnL=$2,836.13
+[2026-08-08 02:08:59,122] [INFO]   ENSEMBLE_3of6: 1708 trades, WR=22.0%, PnL=$6,326.16
+[2026-08-08 02:08:59,122] [INFO] 
+[3/5] Testing trade tracker...
+[2026-08-08 02:08:59,138] [INFO] BinanceBroker initialized (dry_run=True, testnet=True, base_url=https://testnet.binancefuture.com)
+[2026-08-08 02:08:59,441] [INFO] [Binance] Connected. Server time offset: 2750ms
+[2026-08-08 02:09:00,011] [INFO] [Binance] Loaded rules for 731 contracts, 570 active perpetuals.
+[2026-08-08 02:09:00,015] [INFO] Binance Broker initialized (live=False)
+[2026-08-08 02:09:00,017] [INFO] [History] Restored consecutive-loss counter: 3 from saved trades
+[2026-08-08 02:09:00,017] [INFO] Daily rollover: start capital = $5138.68
+[2026-08-08 02:09:00,017] [INFO]   After trade: trades=24, capital=$5,138.68
+[2026-08-08 02:09:00,017] [INFO] 
+[4/5] Testing snapshot store...
+[2026-08-08 02:09:00,018] [INFO]   BTCUSDT price: $65,000.00
+[2026-08-08 02:09:00,019] [INFO] 
+[5/5] Testing ensemble aggregator...
+[2026-08-08 02:09:00,019] [INFO]   Direction=1, Confidence=0.69, Agreeing=4/6, Should Enter=True
+[2026-08-08 02:09:00,019] [INFO] 
+============================================================
+[2026-08-08 02:09:00,019] [INFO] SMOKE TEST COMPLETE — All systems operational
+[2026-08-08 02:09:00,019] [INFO] ============================================================
+[2026-08-08 02:10:29,797] [INFO] Loaded ensemble_strategy_predictor module
+[2026-08-08 02:10:29,800] [INFO] ============================================================
+[2026-08-08 02:10:29,800] [INFO] ENGINE_1 SMOKE TEST
+[2026-08-08 02:10:29,800] [INFO] ============================================================
+[2026-08-08 02:10:29,800] [INFO] 
+[1/5] Testing signal functions...
+[2026-08-08 02:10:29,800] [INFO] [OrderFlow] BTCUSDT: initialized (levels=5, spoof_lookback=2.0s)
+[2026-08-08 02:10:29,800] [INFO] [OrderFlow] ETHUSDT: initialized (levels=5, spoof_lookback=2.0s)
+[2026-08-08 02:10:31,021] [INFO] EnsembleStrategyPredictor initialized for 2 symbols
+[2026-08-08 02:10:31,021] [INFO] Active Strategies (7/7): ['S1_Liquidation', 'S2_CVD_Momentum', 'S3_Trend_Follow', 'S4_Mean_Reversion', 'S5_Vol_Expansion', 'S6_OI_Momentum', 'S7_CVD_Divergence']
+[2026-08-08 02:10:31,021] [INFO] Config: min_confidence=0.45, min_agreeing=3
+[2026-08-08 02:10:31,021] [INFO] Warm-up gate active — requires 200 bars + 30s live ticks
+[2026-08-08 02:10:31,067] [INFO] 
+[2/5] Testing backtest on BTCUSDT...
+[2026-08-08 02:10:31,067] [INFO] Running backtest for BTCUSDT...
+[2026-08-08 02:10:32,463] [INFO]   S1_Liquidation: 27 trades, WR=48.1%, PnL=$785.51
+[2026-08-08 02:10:32,463] [INFO]   S2_CVD_Momentum: 1849 trades, WR=22.1%, PnL=$6,580.12
+[2026-08-08 02:10:32,463] [INFO]   S3_Trend_Follow: 2183 trades, WR=22.4%, PnL=$8,763.27
+[2026-08-08 02:10:32,463] [INFO]   S4_Mean_Reversion: 1642 trades, WR=22.1%, PnL=$6,523.40
+[2026-08-08 02:10:32,463] [INFO]   S5_Vol_Expansion: 1845 trades, WR=24.0%, PnL=$10,590.46
+[2026-08-08 02:10:32,463] [INFO]   S6_OI_Momentum: 2558 trades, WR=21.7%, PnL=$8,060.56
+[2026-08-08 02:10:32,463] [INFO]   S7_CVD_Divergence: 101 trades, WR=42.6%, PnL=$2,836.13
+[2026-08-08 02:10:32,463] [INFO]   ENSEMBLE_3of6: 1708 trades, WR=22.0%, PnL=$6,326.16
+[2026-08-08 02:10:32,464] [INFO] 
+[3/5] Testing trade tracker...
+[2026-08-08 02:10:32,477] [INFO] BinanceBroker initialized (dry_run=True, testnet=True, base_url=https://testnet.binancefuture.com)
+[2026-08-08 02:10:32,745] [INFO] [Binance] Connected. Server time offset: 2747ms
+[2026-08-08 02:10:33,334] [INFO] [Binance] Loaded rules for 731 contracts, 570 active perpetuals.
+[2026-08-08 02:10:33,335] [INFO] Binance Broker initialized (live=False)
+[2026-08-08 02:10:33,336] [INFO] [History] Restored consecutive-loss counter: 3 from saved trades
+[2026-08-08 02:10:33,336] [INFO] Daily rollover: start capital = $5138.68
+[2026-08-08 02:10:33,337] [INFO]   After trade: trades=24, capital=$5,138.68
+[2026-08-08 02:10:33,337] [INFO] 
+[4/5] Testing snapshot store...
+[2026-08-08 02:10:33,338] [INFO]   BTCUSDT price: $65,000.00
+[2026-08-08 02:10:33,338] [INFO] 
+[5/5] Testing ensemble aggregator...
+[2026-08-08 02:10:33,338] [INFO]   Direction=1, Confidence=0.69, Agreeing=4/6, Should Enter=True
+[2026-08-08 02:10:33,338] [INFO] 
+============================================================
+[2026-08-08 02:10:33,338] [INFO] SMOKE TEST COMPLETE — All systems operational
+[2026-08-08 02:10:33,338] [INFO] ============================================================
