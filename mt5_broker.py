@@ -48,11 +48,25 @@ class MT5Broker:
         self._connect_failures = 0
         self._last_connect_attempt = 0.0
         self.magic = magic
+        self._mt5_launched = False
 
     def connect(self):
         if self.dry_run:
             self.connected = True
             return True
+
+        # Auto-open MT5 GUI once (not on every reconnect)
+        if not self._mt5_launched:
+            try:
+                import os as _os, subprocess as _sp
+                mt5_path = r"C:\Program Files\MetaTrader 5\terminal64.exe"
+                if _os.path.exists(mt5_path):
+                    _sp.Popen([mt5_path])
+                    time.sleep(3.0)  # wait for terminal to become ready
+                    self._mt5_launched = True
+            except Exception:
+                pass
+
         with self._lock:
             now = time.time()
             # Backoff: 1s, 2s, 4s ... cap 30s between re-init attempts
@@ -64,6 +78,7 @@ class MT5Broker:
                 mt5.shutdown()
             except Exception:
                 pass
+
             if not mt5.initialize():
                 self._connect_failures += 1
                 log.info(f"[MT5] initialize() failed (attempt {self._connect_failures}), error={mt5.last_error()}")
@@ -223,50 +238,56 @@ class MT5Broker:
             if tick is None or (tick.bid == 0.0 and tick.ask == 0.0):
                 print(f"[MT5 SKIP] {mt5_sym}: no live tick.")
                 return None
+            if time.time() - tick.time > 300:
+                print(f"[MT5 SKIP] {mt5_sym}: stale tick data ({int(time.time() - tick.time)}s old, market likely closed).")
+                return None
 
             mt5_entry = float(tick.ask if direction == 1 else tick.bid)
 
             if bin_entry <= 0:
                 return None
 
-            # Determine if we are placing a limit order for a pullback (Double-Barrel)
-            is_limit = False
-            target_price = bin_entry
-
-            # For Limit orders, the bin_entry must be strictly "better" by at least 0.05%
-            # otherwise it might get rejected as too close to market or just executed as market.
-            min_limit_distance = 0.0005
-
-            if direction == 1 and bin_entry < mt5_entry * (1.0 - min_limit_distance):
-                order_type = mt5.ORDER_TYPE_BUY_LIMIT
-                is_limit = True
-            elif direction == -1 and bin_entry > mt5_entry * (1.0 + min_limit_distance):
-                order_type = mt5.ORDER_TYPE_SELL_LIMIT
-                is_limit = True
-            else:
-                order_type = mt5.ORDER_TYPE_BUY if direction == 1 else mt5.ORDER_TYPE_SELL
-
-            exec_price = self._normalize_price(sym_info, bin_entry) if is_limit else mt5_entry
+            # Dynamic Asset-Aware Execution Strategy
+            crypto_majors = {"BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT", "XRPUSDT"}
+            commodities = {"XAUUSDT", "XAGUSDT", "CLUSDT", "NATGASUSDT"}
 
             sl_pct_dist = abs(bin_entry - bin_sl) / bin_entry
             tp_pct_dist = abs(bin_entry - bin_tp) / bin_entry
-            basis_pct = abs(mt5_entry - bin_entry) / bin_entry
+            
+            # Directional slippage: Positive means worse price for us on MT5
+            if direction == 1:
+                slippage_pct = (mt5_entry - bin_entry) / bin_entry
+            else:
+                slippage_pct = (bin_entry - mt5_entry) / bin_entry
 
-            # Reject if broker quote is too far from signal market, UNLESS converted to a Limit order
-            max_basis_allowed = min(
-                self.max_abs_basis_pct,
-                max(0.0030, 0.50 * sl_pct_dist),
-            )
+            is_limit = False
 
-            if not is_limit and basis_pct > max_basis_allowed:
-                # Convert to Limit Order at bin_entry instead of hard skipping
-                order_type = mt5.ORDER_TYPE_BUY_LIMIT if direction == 1 else mt5.ORDER_TYPE_SELL_LIMIT
-                is_limit = True
-                exec_price = self._normalize_price(sym_info, bin_entry)
-                print(
-                    f"[MT5 AUTO-LIMIT] {binance_symbol}->{mt5_sym}: basis {basis_pct*100:.3f}% > allowed {max_basis_allowed*100:.3f}%. "
-                    f"Converted to Limit Order at {exec_price:.8f}"
-                )
+            if binance_symbol in crypto_majors:
+                # Category 1: Crypto Majors -> Always Market Order (Instant Fill)
+                order_type = mt5.ORDER_TYPE_BUY if direction == 1 else mt5.ORDER_TYPE_SELL
+                is_limit = False
+            elif binance_symbol in commodities:
+                max_comm_slip = 0.0025
+                if slippage_pct > max_comm_slip:
+                    print(
+                        f"[MT5 REJECT] {binance_symbol}->{mt5_sym}: slippage {slippage_pct*100:.3f}% > {max_comm_slip*100:.2f}%. "
+                        f"Trade rejected to prevent unfilled limit order."
+                    )
+                    return None
+                else:
+                    order_type = mt5.ORDER_TYPE_BUY if direction == 1 else mt5.ORDER_TYPE_SELL
+            else:
+                max_alt_slip = min(self.max_abs_basis_pct, max(0.0030, 0.50 * sl_pct_dist))
+                if slippage_pct > max_alt_slip:
+                    print(
+                        f"[MT5 REJECT] {binance_symbol}->{mt5_sym}: slippage {slippage_pct*100:.3f}% > {max_alt_slip*100:.2f}%. "
+                        f"Trade rejected to prevent unfilled limit order."
+                    )
+                    return None
+                else:
+                    order_type = mt5.ORDER_TYPE_BUY if direction == 1 else mt5.ORDER_TYPE_SELL
+
+            exec_price = mt5_entry
 
             if direction == 1:
                 mt5_sl = exec_price * (1.0 - sl_pct_dist)
@@ -337,7 +358,7 @@ class MT5Broker:
             if self.dry_run:
                 print(f"[MT5 DRY RUN] {mt5_sym} | {'LONG' if direction == 1 else 'SHORT'}")
                 print(f"   Engine Entry: {bin_entry:.8f} | MT5 Entry/Exec: {exec_price:.8f}")
-                print(f"   Basis: {basis_pct*100:.3f}% | Allowed: {max_basis_allowed*100:.3f}%")
+                print(f"   Slippage: {slippage_pct*100:.3f}%")
                 print(f"   MT5 SL: {mt5_sl:.8f} | MT5 TP: {mt5_tp:.8f}")
                 print(f"   Lot: {lot:.4f} | Risk: ${risk_usd:.2f} | dev={deviation_points}pts")
                 return {
@@ -347,7 +368,7 @@ class MT5Broker:
                     "mt5_sl": mt5_sl,
                     "mt5_tp": mt5_tp,
                     "lot": lot,
-                    "basis_pct": basis_pct,
+                    "basis_pct": slippage_pct,
                     "is_pending": is_limit,
                 }
 
@@ -404,7 +425,7 @@ class MT5Broker:
                     positions = mt5.positions_get(symbol=mt5_sym)
                     if positions:
                         mine = [p for p in positions if getattr(p, "magic", None) == self.magic]
-                        candidates = mine or list(positions)
+                        candidates = mine
                         latest = max(candidates, key=lambda p: getattr(p, "time_msc", getattr(p, "time", 0)))
                         position_ticket = int(latest.ticket)
             else:
@@ -425,7 +446,7 @@ class MT5Broker:
                 "mt5_sl": mt5_sl,
                 "mt5_tp": mt5_tp,
                 "lot": lot,
-                "basis_pct": basis_pct,
+                "basis_pct": slippage_pct,
                 "is_pending": is_limit,
             }
 
@@ -566,10 +587,15 @@ class MT5Broker:
             positions = mt5.positions_get(symbol=mt5_sym) if mt5_sym else mt5.positions_get()
             if not positions:
                 return None
-            mine = [p for p in positions if getattr(p, "magic", None) == self.magic]
-            if not mine:
+            mine = [p for p in positions
+                    if getattr(p, "magic", None) == self.magic
+                    and getattr(p, "identifier", None) == order_ticket]
+            if mine:
+                return int(mine[0].ticket)
+            fallback = [p for p in positions if getattr(p, "magic", None) == self.magic]
+            if not fallback:
                 return None
-            latest = max(mine, key=lambda p: getattr(p, "time_msc", getattr(p, "time", 0)))
+            latest = max(fallback, key=lambda p: getattr(p, "time_msc", getattr(p, "time", 0)))
             return int(latest.ticket)
 
     def list_engine_positions(self) -> list:
@@ -587,11 +613,7 @@ class MT5Broker:
         if self.dry_run or not self.ensure_connected() or not position_ticket:
             return 0.0, 0.0
         with self._lock:
-            from datetime import datetime, timedelta
-            # Search last 30 days of deals for this position ticket
-            date_from = datetime.now() - timedelta(days=30)
-            date_to = datetime.now() + timedelta(days=1)
-            deals = mt5.history_deals_get(date_from, date_to, group="*")
+            deals = mt5.history_deals_get(position=position_ticket)
             if not deals:
                 return 0.0, 0.0
             
@@ -620,3 +642,14 @@ class MT5Broker:
             }
             result = self._order_send_with_retry(request, max_retries=2)
             return result is not None and result.retcode == mt5.TRADE_RETCODE_DONE
+
+    def get_account_balance_and_equity(self) -> tuple[float, float]:
+        """Return (balance, equity) from live MT5 account."""
+        if getattr(self, "dry_run", False) or not self.ensure_connected():
+            return 0.0, 0.0
+        with self._lock:
+            acc = mt5.account_info()
+            if acc is not None:
+                return float(acc.balance), float(acc.equity)
+            return 0.0, 0.0
+

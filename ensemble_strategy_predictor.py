@@ -49,13 +49,13 @@ log = logging.getLogger('EnsembleStrategy')
 class StrategyConfig:
     """Production config matching validated backtest parameters."""
     initial_capital: float = 5000.0
-    risk_per_trade: float = 20.0       # $20 per trade
+    risk_per_trade: float = 10.0       # $10 per trade
     max_daily_risk: float = 200.0      # 4% daily
     max_drawdown_pct: float = 15.0     # Global circuit breaker
-    tp_mult: float = 5.0               # 5R minimum take profit
+    tp_mult: float = 4.0               # 4R minimum take profit
     trail_atr: float = 0.8             # Trailing stop
     fee_pct: float = 0.0020            # 0.20% round-trip
-    min_confidence: float = 0.50       # Minimum ensemble confidence
+    min_confidence: float = 0.45       # Minimum ensemble confidence (lowered to allow any 3-strategy combo)
     min_agreeing: int = 3              # Need 3/6 strategies agreeing
     bar_warmup: int = 200              # Warmup bars
     cooldown_bars: int = 2             # Min bars between entries
@@ -142,7 +142,7 @@ def featurize(df: pd.DataFrame, btc_ref: Optional[pd.DataFrame] = None) -> pd.Da
     d = df["Close"].diff()
     g = d.clip(lower=0).rolling(14, min_periods=1).mean()
     l_ = (-d.clip(upper=0)).rolling(14, min_periods=1).mean()
-    df["rsi"] = 100 - (100 / (1 + g / l_.replace(0, 1e-10)))
+    df["rsi"] = 100 - (100 / (1 + (g / l_.replace(0, 1e-10)).fillna(1)))
 
     # Vol regime
     df["vr"] = zscore(df["atr"], 100)
@@ -470,6 +470,7 @@ class EnsembleStrategyPredictor:
         self.ensemble = EnsembleAggregator(self.cfg, active_strategies=self.active_strategies)
         self.latest_atr: Dict[str, float] = {}
         self.recent_capitals: List[float] = []
+        self._capital_lock = threading.Lock()
         self._last_tick_print: Dict[str, float] = {}
         self._last_model_check_time: float = 0.0
 
@@ -728,9 +729,9 @@ class EnsembleStrategyPredictor:
                 return
 
             # Compute SL/TP levels
-            sl_mult = 1.0  # 1 ATR stop
-            tp_mult = self.cfg.tp_mult  # 5R target
-            trail_act = self.cfg.trail_atr  # 0.8 ATR trail activation
+            sl_mult = 2.0  # 2 ATR stop (widened from 1 ATR to survive 15m noise)
+            tp_mult = 4.0  # 4R target (adjusted from 5R to improve hit rate)
+            trail_act = 1.5  # 1.5 ATR trail activation (widened from 0.8)
 
             if direction == 1:
                 sl = current_price - sl_mult * atr_val
@@ -778,9 +779,10 @@ class EnsembleStrategyPredictor:
 
     def record_closed_capital(self, capital: float) -> None:
         """Called when a trade closes to update equity curve tracker."""
-        self.recent_capitals.append(capital)
-        if len(self.recent_capitals) > 50:
-            self.recent_capitals = self.recent_capitals[-50:]
+        with self._capital_lock:
+            self.recent_capitals.append(capital)
+            if len(self.recent_capitals) > 50:
+                self.recent_capitals = self.recent_capitals[-50:]
 
     def check_model_updates(self) -> None:
         """No-op for rule-based strategies (no ML models to hot-swap)."""

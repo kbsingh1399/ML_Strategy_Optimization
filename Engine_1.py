@@ -67,11 +67,13 @@ log = logging.getLogger('Engine_1')
 BASE_DIR = Path(__file__).parent if '__file__' in dir() else Path('.')
 DATA_DIR = BASE_DIR / 'Backtesting_Data'
 
-EXECUTION_MODE = os.environ.get("EXECUTION_MODE", "DRY_RUN")
-MT5_LIVE = os.environ.get("MT5_LIVE", "0").strip().lower() in ("1", "true", "yes", "live")
+LIVE_TRADING = os.environ.get("LIVE_TRADING", os.environ.get("MT5_LIVE", "0")).strip().lower() in ("1", "true", "yes", "live")
+MT5_LIVE = LIVE_TRADING
+EXECUTION_MODE = "LIVE" if LIVE_TRADING else "DEMO / DRY_RUN"
 ACTIVE_STRATEGY = os.environ.get("ACTIVE_STRATEGY", "ensemble_6strategy")
 STRATEGY_DISPLAY_NAME = "Ensemble_6Strategy"
-ENGINE_RISK_PCT = float(os.environ.get("ENGINE_RISK_PCT", "0.004"))
+ENGINE_RISK_PCT = float(os.environ.get("ENGINE_RISK_PCT", "0.002"))
+MAX_RISK_PER_TRADE_USD = float(os.environ.get("MAX_RISK_USD", "10.0"))
 
 ML_EXECUTOR = ThreadPoolExecutor(
     max_workers=int(os.environ.get("ML_THREADS", "2")),
@@ -81,8 +83,8 @@ ML_EXECUTOR = ThreadPoolExecutor(
 # Symbol lists (matches Coinglass layout S9)
 TAB1_SYMBOLS = ["BTCUSDT", "ETHUSDT", "XRPUSDT", "SOLUSDT", "BNBUSDT",
                 "DOGEUSDT", "ADAUSDT", "TRXUSDT", "LINKUSDT"]
-TAB2_SYMBOLS = ["AVAXUSDT", "SUIUSDT", "NEARUSDT", "DOTUSDT", "LTCUSDT",
-                "XAUUSDT", "XAGUSDT", "CLUSDT", "NATGASUSDT"]
+TAB2_SYMBOLS = ["AVAXUSDT", "SUIUSDT", "NEARUSDT", "DOTUSDT", "LTCUSDT"]
+NON_BINANCE_SYMBOLS = {"XAUUSDT", "XAGUSDT", "CLUSDT", "NATGASUSDT"}
 ALL_SYMBOLS = TAB1_SYMBOLS + TAB2_SYMBOLS
 
 REFRESH_HZ = 2.0
@@ -111,11 +113,11 @@ MAX_UNITS_PER_SYMBOL = {
 @dataclass
 class EngineConfig:
     initial_capital: float = 5000.0
-    risk_per_trade: float = 20.0
+    risk_per_trade: float = 10.0  # Halved from $20 to compensate for 2x wider stop loss
     max_daily_risk: float = 200.0
     max_drawdown_pct: float = 15.0
-    tp_mult: float = 5.0
-    trail_atr: float = 0.8
+    tp_mult: float = 4.0  # Adjusted from 5.0
+    trail_atr: float = 1.5  # Adjusted from 0.8
     fee_pct: float = 0.0020
     min_confidence: float = 0.50
     min_agreeing: int = 3
@@ -186,21 +188,32 @@ except ImportError:
     raise
 
 
-# ─── MT5 BROKER (Lazy Import) ──────────────────────────────────────────────
+# ─── BROKER SELECTION (Lazy Import) ──────────────────────────────────────────
 
-def _get_mt5_broker():
-    """Lazy-load MT5 broker with graceful fallback."""
+BROKER_TYPE = os.environ.get("BROKER_TYPE", "binance").strip().lower()
+
+def _get_broker():
+    """Lazy-load broker module based on BROKER_TYPE (binance or mt5)."""
+    if BROKER_TYPE in ("binance", "binance_futures"):
+        try:
+            from binance_broker import BinanceBroker
+            return BinanceBroker, "Binance"
+        except ImportError as e:
+            log.warning(f"Could not load BinanceBroker: {e}")
     try:
         from mt5_broker import MT5Broker
-        return MT5Broker, True
+        return MT5Broker, "MT5"
     except ImportError:
         pass
     try:
         from execution.mt5_bridge import MT5ExecutionBridge
-        return MT5ExecutionBridge, False
+        return MT5ExecutionBridge, "MT5Bridge"
     except ImportError:
         pass
-    return None, False
+    return None, "None"
+
+def _get_mt5_broker():
+    return _get_broker()
 
 
 # ─── BINANCE FOOTPRINT FEED ────────────────────────────────────────────────
@@ -418,29 +431,73 @@ class Engine1TradeTracker:
         self.last_rollover_day = datetime.now().strftime("%Y-%m-%d")
         self.emergency_halt = False
 
-        # MT5 broker initialization
-        self.mt5_broker = None
+        # Broker initialization (Binance)
+        self.broker = None
         self.broker_executor = None
-        mt5_class, _ = _get_mt5_broker()
-        if mt5_class:
+        broker_class, broker_name = _get_broker()
+        if broker_class:
             try:
-                self.mt5_broker = mt5_class(
-                    dry_run=not MT5_LIVE,
+                self.broker = broker_class(
+                    dry_run=not LIVE_TRADING,
                     account_size=initial_capital,
                     risk_pct=ENGINE_RISK_PCT,
                 )
-                if hasattr(self.mt5_broker, 'connect'):
-                    self.mt5_broker.connect()
+                if hasattr(self.broker, 'connect'):
+                    connected = self.broker.connect()
+                    if LIVE_TRADING and not connected:
+                        raise RuntimeError(f"{broker_name} connect() returned False in live mode — check your API credentials / connection.")
                 self.broker_executor = ThreadPoolExecutor(
-                    max_workers=1, thread_name_prefix="MT5Broker")
-                log.info(f"MT5 Broker initialized (live={MT5_LIVE})")
+                    max_workers=1, thread_name_prefix=f"{broker_name}Broker")
+                log.info(f"{broker_name} Broker initialized (live={LIVE_TRADING})")
             except Exception as e:
-                log.warning(f"MT5 Broker init failed: {e} — dry-run mode")
+                if LIVE_TRADING:
+                    log.critical(f"[FATAL] {broker_name} Broker init failed in LIVE mode: {e}")
+                    raise RuntimeError(f"Cannot start live trading without {broker_name} connection: {e}") from e
+                log.warning(f"{broker_name} Broker init failed: {e} — dry-run mode")
         else:
-            log.info("MT5 Broker not available — dry-run mode")
+            if LIVE_TRADING:
+                log.critical(f"[FATAL] Broker module ({BROKER_TYPE}) not found — cannot run in LIVE mode.")
+                raise RuntimeError(f"Broker module ({BROKER_TYPE}) is required for live trading but could not be loaded.")
+            log.info("Execution Broker not available — dry-run mode")
 
+        self.live_account_balance: float = 0.0
+        self.live_account_equity: float = 0.0
+        self.live_account_unrealized_pnl: float = 0.0
+        self.last_account_sync: float = 0.0
         self.log_file = BASE_DIR / "Engine_1_trade_logs.json"
         self.load_history()
+        self.sync_with_exchange_account()
+
+    def sync_live_account(self, force: bool = False):
+        """Sync tracking capital directly with live Binance Futures account equity, balance, and unrealized PnL."""
+        now = time.time()
+        if not force and (now - self.last_account_sync < 3.0):
+            return
+        self.last_account_sync = now
+
+        if self.broker and LIVE_TRADING:
+            if hasattr(self.broker, 'get_account_details'):
+                details = self.broker.get_account_details()
+                bal = details.get("balance", 0.0)
+                eq = details.get("equity", 0.0)
+                upnl = details.get("unrealized_pnl", 0.0)
+            else:
+                bal, eq = self.broker.get_account_balance_and_equity()
+                upnl = eq - bal
+
+            if eq > 0:
+                with self.lock:
+                    self.live_account_balance = bal
+                    self.live_account_equity = eq
+                    self.live_account_unrealized_pnl = upnl
+                    self.current_capital = eq
+                    self.peak_capital = max(self.peak_capital, eq)
+
+    def sync_with_exchange_account(self):
+        """Initial sync for tracking capital directly with live Binance Futures account."""
+        self.sync_live_account(force=True)
+        if self.live_account_equity > 0:
+            log.info(f"[BINANCE SYNC] Synced engine tracking capital with live Binance Equity: ${self.live_account_equity:,.2f} (Balance: ${self.live_account_balance:,.2f})")
 
     def _cooldown_key(self, strategy: str, symbol: str) -> str:
         return f"{strategy}:{symbol}"
@@ -503,8 +560,8 @@ class Engine1TradeTracker:
                 with open(tmp, 'w', encoding='utf-8') as f:
                     json.dump(envelope, f, indent=4)
                 os.replace(tmp, str(self.log_file))
-            except Exception:
-                pass
+            except Exception as e:
+                log.error(f"[TradeTracker] Failed to save history: {e}")
 
     def trigger_entry(self, symbol: str, strategy: str, direction: int,
                       entry_price: float, sl: float, tp: float, atr: float,
@@ -587,14 +644,15 @@ class Engine1TradeTracker:
                     sl = entry_price + stop_dist
                     tp = entry_price - tp_dist
 
-            # Zeno risk formula
+            # Zeno risk formula — hard-capped at MAX_RISK_PER_TRADE_USD
             max_dd_limit = 250.0
             zeno_denom = 5.0
             risk_cap = 20.0
             current_dd = max(0.0, self.peak_capital - self.current_capital)
             raw_zeno = (max_dd_limit - current_dd) / zeno_denom
-            zeno_risk_pct = max(0.0, min(risk_cap, raw_zeno)) / 5000.0
+            zeno_risk_pct = max(0.0, min(risk_cap, raw_zeno)) / max(self.initial_capital, 1.0)
             risk_capital = max(0.0, self.current_capital) * zeno_risk_pct * risk_mult
+            risk_capital = min(risk_capital, MAX_RISK_PER_TRADE_USD)
 
             if risk_capital <= 0.0 or stop_dist <= 0:
                 return
@@ -639,32 +697,37 @@ class Engine1TradeTracker:
                 "sl_dist": stop_dist,
                 "trail_act": trail_act,
                 "trail_buf": 0.5,
+                "is_pending": True,
             }
             log.info(f"[ENTRY] {trade_id}: {symbol} {'LONG' if direction==1 else 'SHORT'} "
                      f"@{entry_price:.2f} SL={sl:.2f} TP={tp:.2f} units={units:.4f}")
 
-        # Dispatch to MT5 (outside lock)
-        if self.broker_executor and self.mt5_broker and MT5_LIVE:
+        # Dispatch to Binance (outside lock)
+        if self.broker_executor and self.broker and LIVE_TRADING:
             try:
                 fut = self.broker_executor.submit(
-                    self.mt5_broker.execute_trade,
+                    self.broker.execute_trade,
                     symbol, direction, entry_price, sl, tp, strategy, risk_capital
                 )
-                mt5_res = fut.result(timeout=30)
+                broker_res = fut.result(timeout=30)
                 with self.lock:
                     t = self.active_trades.get(trade_id)
-                    if t and mt5_res:
-                        t["mt5_ticket"] = mt5_res.get("mt5_ticket")
-                        t["mt5_entry"] = mt5_res.get("mt5_entry")
-                        t["mt5_sl"] = mt5_res.get("mt5_sl")
-                        t["mt5_tp"] = mt5_res.get("mt5_tp")
-                        t["mt5_lot"] = mt5_res.get("lot")
-                        log.info(f"[MT5] Trade {trade_id} dispatched, ticket={t['mt5_ticket']}")
+                    if t and broker_res:
+                        t["order_id"] = broker_res.get("order_id")
+                        t["broker_lot"] = broker_res.get("lot")
+                        if broker_res.get("entry_price"):
+                            t["entry_price"] = broker_res.get("entry_price")
+                        if broker_res.get("sl_price"):
+                            t["sl"] = broker_res.get("sl_price")
+                        if broker_res.get("tp_price"):
+                            t["tp"] = broker_res.get("tp_price")
+                        t["is_pending"] = False
+                        log.info(f"[BINANCE SYNC] Trade {trade_id} synced: fill=${t['entry_price']:.4f}, orderId={t['order_id']}")
                     elif t:
-                        log.warning(f"[MT5] Trade {trade_id} rejected — removing")
-                        self.active_trades.pop(trade_id, None)
+                        del self.active_trades[trade_id]
+                        log.warning(f"[Binance] Trade {trade_id} rejected by exchange — removed from active_trades")
             except Exception as e:
-                log.error(f"[MT5] Dispatch failed for {trade_id}: {e}")
+                log.error(f"[Binance] Dispatch failed for {trade_id}: {e}")
                 with self.lock:
                     self.active_trades.pop(trade_id, None)
 
@@ -673,7 +736,10 @@ class Engine1TradeTracker:
     def update_live_pnl(self, symbol: str, current_price: float):
         """Update unrealized PnL for all active trades on symbol."""
         with self.lock:
-            for trade in list(self.active_trades.values()):
+            for tid, trade in list(self.active_trades.items()):
+                if trade.get("is_pending", False):
+                    continue
+
                 if trade.get('symbol') != symbol:
                     continue
                 direction = trade['direction']
@@ -701,7 +767,8 @@ class Engine1TradeTracker:
             equity = self.current_capital + unrealized
             daily_dd = ((self.daily_start_capital - equity) / self.daily_start_capital * 100.0
                         if self.daily_start_capital > 0 else 0.0)
-            total_dd = ((self.initial_capital - equity) / self.initial_capital * 100.0)
+            total_dd = ((self.initial_capital - equity) / self.initial_capital * 100.0
+                        if self.initial_capital > 0 else 0.0)
 
             if daily_dd >= 4.5 or total_dd >= 9.0:
                 if not self.emergency_halt:
@@ -711,11 +778,13 @@ class Engine1TradeTracker:
     def check_exits(self, symbol: str, current_price: float,
                     current_atr: float = 0.0) -> None:
         """Check and execute SL/TP/trailing stop exits."""
+        broker_modify_jobs = []
+        broker_close_jobs = []
         with self.lock:
-            trades_for_symbol = [t for t in self.active_trades.values()
-                                 if t.get('symbol') == symbol]
+            trades_for_symbol = [(tid, t) for tid, t in self.active_trades.items()
+                                 if t.get('symbol') == symbol and not t.get('is_pending')]
             any_closed = False
-            for trade in trades_for_symbol:
+            for tid, trade in trades_for_symbol:
                 direction = trade['direction']
                 sl = trade['sl']
                 tp = trade['tp']
@@ -734,6 +803,7 @@ class Engine1TradeTracker:
                             if ns > sl:
                                 trade['sl'] = ns
                                 sl = ns
+                                broker_modify_jobs.append((trade.get('symbol'), ns, trade['tp']))
                     else:
                         cur_r = (entry_price - current_price) / sl_dist
                         if cur_r >= trail_act:
@@ -742,6 +812,7 @@ class Engine1TradeTracker:
                             if ns < sl:
                                 trade['sl'] = ns
                                 sl = ns
+                                broker_modify_jobs.append((trade.get('symbol'), ns, trade['tp']))
 
                 # Timeout exit (24 hours)
                 elapsed = time.time() - trade.get('entry_timestamp', time.time())
@@ -749,26 +820,23 @@ class Engine1TradeTracker:
                 reason = "TIMEOUT" if should_close else ""
 
                 # SL/TP check
+                sl_hit = False
+                tp_hit = False
                 if not should_close:
                     if direction == 1:
                         if current_price <= sl:
-                            should_close = True
-                            reason = "SL"
+                            sl_hit = True
                         elif current_price >= tp:
-                            should_close = True
-                            reason = "TP"
+                            tp_hit = True
                     else:
                         if current_price >= sl:
-                            should_close = True
-                            reason = "SL"
+                            sl_hit = True
                         elif current_price <= tp:
-                            should_close = True
-                            reason = "TP"
+                            tp_hit = True
 
-                if should_close:
-                    exit_price = (trade['sl'] if reason == "SL"
-                                  else trade['tp'] if reason == "TP"
-                                  else current_price)
+                if sl_hit or tp_hit or should_close:
+                    exit_price = (trade['sl'] if sl_hit else trade['tp'] if tp_hit else current_price)
+                    reason = "SL" if sl_hit else "TP" if tp_hit else reason
 
                     trade['exit_price'] = exit_price
                     trade['exit_time'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -798,6 +866,7 @@ class Engine1TradeTracker:
                              f"PnL=${pnl_usd:.2f} ({pnl_pct:+.2f}%)")
 
                     del self.active_trades[trade['trade_id']]
+                    broker_close_jobs.append((trade.get('symbol'), reason))
                     any_closed = True
 
                     # Notify callbacks
@@ -810,6 +879,14 @@ class Engine1TradeTracker:
 
             if any_closed:
                 self.save_history()
+
+        if self.broker_executor and self.broker and LIVE_TRADING:
+            for sym, new_sl, tp in broker_modify_jobs:
+                if sym:
+                    self.broker_executor.submit(self.broker.modify_sltp, sym, 0, new_sl, tp)
+            for sym, reason in broker_close_jobs:
+                if sym:
+                    self.broker_executor.submit(self.broker.close_position, sym, reason)
 
     def get_stats(self) -> dict:
         with self.lock:
@@ -840,7 +917,7 @@ def render_table(snap: Dict[str, AssetSnapshot], trade_tracker=None):
         t = Table(title="Engine_1 — 6-Strategy ML Trading Terminal", expand=True)
         cols = ("Symbol", "Price", "RSI", "FutCVD", "SpotCVD", "LiqL", "LiqS",
                 "Fund", "LSR", "OI", "CoinsB", "CoinsA", "USDB", "USDA",
-                "Whale", "BuyC", "SellC", "FP_Δ", "FP_POC", "ARM")
+                "Whale", "BuyC", "SellC", "FP_Delta", "FP_POC", "ARM")
         for col in cols:
             t.add_column(col, justify="center", no_wrap=True)
 
@@ -883,18 +960,36 @@ def render_table(snap: Dict[str, AssetSnapshot], trade_tracker=None):
         if trade_tracker is None:
             return t
 
+        trade_tracker.sync_live_account()
         stats = trade_tracker.get_stats()
         total_pnl = stats['total_pnl_usd']
+
+        live_bal = getattr(trade_tracker, 'live_account_balance', 0.0)
+        live_eq = getattr(trade_tracker, 'live_account_equity', 0.0)
+        live_upnl = getattr(trade_tracker, 'live_account_unrealized_pnl', 0.0)
+
         pnl_clr = "green" if total_pnl >= 0 else "red"
         pnl_sign = "+" if total_pnl >= 0 else ""
-        pnl_pct = total_pnl / trade_tracker.initial_capital * 100.0
+        pnl_pct = (total_pnl / trade_tracker.initial_capital * 100.0
+                   if trade_tracker.initial_capital > 0 else 0.0)
 
-        stats_text = (
-            f"Capital: [bold]${stats['current_capital']:,.2f}[/] | "
-            f"PnL: [bold {pnl_clr}]{pnl_sign}${total_pnl:.2f} ({pnl_pct:+.2f}%)[/] | "
-            f"Trades: [bold]{stats['total']}[/] | "
-            f"WR: [bold]{stats['winrate']:.1f}%[/]"
-        )
+        if live_eq > 0:
+            live_pnl_clr = "green" if live_upnl >= 0 else "red"
+            live_pnl_sign = "+" if live_upnl >= 0 else ""
+            stats_text = (
+                f"Binance Balance: [bold]${live_bal:,.2f}[/] | "
+                f"Equity: [bold]${live_eq:,.2f}[/] | "
+                f"Live Account PnL: [bold {live_pnl_clr}]{live_pnl_sign}${live_upnl:.2f}[/] | "
+                f"Trades: [bold]{stats['total']}[/] | "
+                f"WR: [bold]{stats['winrate']:.1f}%[/]"
+            )
+        else:
+            stats_text = (
+                f"Capital: [bold]${stats['current_capital']:,.2f}[/] | "
+                f"PnL: [bold {pnl_clr}]{pnl_sign}${total_pnl:.2f} ({pnl_pct:+.2f}%)[/] | "
+                f"Trades: [bold]{stats['total']}[/] | "
+                f"WR: [bold]{stats['winrate']:.1f}%[/]"
+            )
 
         active_lines = []
         with trade_tracker.lock:
@@ -1090,11 +1185,13 @@ async def watchdog(components: List[Any], stop: asyncio.Event) -> None:
 
 
 async def main_async(skip_seed: bool = False, skip_train: bool = False,
-                     skip_browser: bool = False, active_strategies=None) -> None:
+                     skip_browser: bool = False, auto_trade_btc: bool = False,
+                     active_strategies=None) -> None:
     """Main async entry point for production mode with modular startup options."""
     log.info("=" * 60)
     log.info(f"ENGINE_1 STARTING — 6-Strategy ML Trading System")
     log.info(f"Mode: {EXECUTION_MODE} | MT5 Live: {MT5_LIVE}")
+    log.info(f"Auto-Trade BTC: {auto_trade_btc}")
     log.info(f"Symbols: {len(ALL_SYMBOLS)} total ({len(TAB1_SYMBOLS)} Tab1 + {len(TAB2_SYMBOLS)} Tab2)")
     log.info("=" * 60)
 
@@ -1138,6 +1235,35 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False,
             asyncio.create_task(watchdog([binance_feed], stop)),
         ]
 
+        if auto_trade_btc:
+            async def _do_auto_trade_less():
+                await asyncio.sleep(4.0)
+                snaps = store.snapshot()
+                btc_snap = snaps.get("BTCUSDT")
+                price = btc_snap.price if (btc_snap and btc_snap.price > 0) else 65000.0
+                sl = round(price * 0.99, 2)
+                tp = round(price * 1.02, 2)
+                stop_dist = abs(price - sl)
+                log.info(f"[AutoTrade] Triggering $100 BTCUSDT test trade @ ${price:,.2f} (SL: ${sl:,.2f}, TP: ${tp:,.2f})")
+                global MAX_RISK_PER_TRADE_USD
+                old_max_risk = MAX_RISK_PER_TRADE_USD
+                MAX_RISK_PER_TRADE_USD = max(MAX_RISK_PER_TRADE_USD, 100.0)
+                trade_tracker.trigger_entry(
+                    symbol="BTCUSDT",
+                    strategy="S1_Demo_Test",
+                    direction=1,
+                    entry_price=price,
+                    sl=sl,
+                    tp=tp,
+                    atr=stop_dist,
+                    macro=1,
+                    vol_regime=0.0,
+                    risk_mult=1.0
+                )
+                MAX_RISK_PER_TRADE_USD = old_max_risk
+
+            asyncio.create_task(_do_auto_trade_less())
+
         log.info("Engine_1 running (browser-less mode) — waiting for market data...")
         try:
             while not stop.is_set():
@@ -1161,12 +1287,11 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False,
         user_data_dir = BASE_DIR / "chrome_profile"
         user_data_dir.mkdir(parents=True, exist_ok=True)
         import subprocess
-        try:
-            subprocess.run(["powershell", "-Command", "Get-Process chrome,chromium -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue"], capture_output=True)
-            for lk in ["LOCK", "SingletonLock", "SingletonSocket", "SingletonCookie"]:
+        for lk in ["LOCK", "SingletonLock", "SingletonSocket", "SingletonCookie"]:
+            try:
                 (user_data_dir / lk).unlink(missing_ok=True)
-        except Exception:
-            pass
+            except Exception:
+                pass
         ctx = await pw.chromium.launch_persistent_context(
             user_data_dir,
             headless=False,
@@ -1176,7 +1301,7 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False,
                 "--disable-features=CalculateNativeWinOcclusion",
                 "--disable-background-timer-throttling",
                 "--start-maximized",
-                "--remote-debugging-port=9222",
+                "--remote-debugging-port=9223",
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
                 "--disable-infobars",
@@ -1296,39 +1421,27 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False,
         else:
             log.info("[Startup] Step 3/5 — Skipping seeding (--skip-seed flag).")
 
-        if not skip_train:
-            # 4. Retrain Models on Latest GDrive Data
-            log.info("[Startup] Step 4/5 — Retraining models on latest GDrive data...")
-            models_dir = BASE_DIR / "models"
-            models_tmp = BASE_DIR / "models_training_tmp"
-            models_old = BASE_DIR / "models_old_backup"
-            if models_tmp.exists():
-                shutil.rmtree(models_tmp)
-            models_tmp.mkdir(parents=True, exist_ok=True)
-            log.info("[Startup] Preparing temporary model training directory.")
+        # 4. Retrain Models on Latest Data (Always Clear & Retrain)
+        log.info("[Startup] Step 4/5 — Clearing previous training & retraining models on latest data...")
+        models_dir = BASE_DIR / "models"
+        models_tmp = BASE_DIR / "models_training_tmp"
+        models_old = BASE_DIR / "models_old_backup"
+        if models_tmp.exists():
+            shutil.rmtree(models_tmp, ignore_errors=True)
+        if models_old.exists():
+            shutil.rmtree(models_old, ignore_errors=True)
+        models_tmp.mkdir(parents=True, exist_ok=True)
+        models_dir.mkdir(parents=True, exist_ok=True)
 
-            try:
-                from live_model_trainer import train_all_strategies
-                loop = asyncio.get_running_loop()
-                await loop.run_in_executor(None, train_all_strategies)
-                
-                # Atomic swap: tmp → models
-                if models_old.exists():
-                    shutil.rmtree(models_old)
-                if models_dir.exists():
-                    models_dir.rename(models_old)
-                models_tmp.rename(models_dir)
-                if models_old.exists():
-                    shutil.rmtree(models_old)
-                log.info("[Startup] Model retraining complete — swapped in new models.")
-            except ImportError:
-                log.warning("[Startup] live_model_trainer.py not found — skipping model training.")
-            except Exception as e:
-                log.warning(f"[Startup] Model training failed ({e}), keeping existing models.")
-                if models_tmp.exists():
-                    shutil.rmtree(models_tmp)
-        else:
-            log.info("[Startup] Step 4/5 — Skipping model clearing and retraining (--skip-train).")
+        try:
+            from live_model_trainer import train_all_strategies
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, train_all_strategies)
+            log.info("[Startup] Model clearing & retraining complete on latest data.")
+        except ImportError:
+            log.warning("[Startup] live_model_trainer.py not found — using base strategy rules.")
+        except Exception as e:
+            log.warning(f"[Startup] Model retraining notice ({e}) — proceeding with base strategy rules.")
 
         # Now call the engine's original parquet loader to feed predictor and snapshot store
         await seed_all_symbols(predictor, ALL_SYMBOLS, DATA_DIR, store=store)
@@ -1359,6 +1472,35 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False,
             asyncio.create_task(renderer_loop(store, stop)),
             asyncio.create_task(watchdog([tab1, tab2, binance_feed], stop)),
         ]
+
+        if auto_trade_btc:
+            async def _do_auto_trade_full():
+                await asyncio.sleep(4.0)
+                snaps = store.snapshot()
+                btc_snap = snaps.get("BTCUSDT")
+                price = btc_snap.price if (btc_snap and btc_snap.price > 0) else 65000.0
+                sl = round(price * 0.99, 2)
+                tp = round(price * 1.02, 2)
+                stop_dist = abs(price - sl)
+                log.info(f"[AutoTrade] Triggering $100 BTCUSDT test trade @ ${price:,.2f} (SL: ${sl:,.2f}, TP: ${tp:,.2f})")
+                global MAX_RISK_PER_TRADE_USD
+                old_max_risk = MAX_RISK_PER_TRADE_USD
+                MAX_RISK_PER_TRADE_USD = max(MAX_RISK_PER_TRADE_USD, 100.0)
+                trade_tracker.trigger_entry(
+                    symbol="BTCUSDT",
+                    strategy="S1_Demo_Test",
+                    direction=1,
+                    entry_price=price,
+                    sl=sl,
+                    tp=tp,
+                    atr=stop_dist,
+                    macro=1,
+                    vol_regime=0.0,
+                    risk_mult=1.0
+                )
+                MAX_RISK_PER_TRADE_USD = old_max_risk
+
+            asyncio.create_task(_do_auto_trade_full())
 
         log.info("Engine_1 running — waiting for market data...")
         try:
@@ -1667,6 +1809,7 @@ if __name__ == "__main__":
     parser.add_argument("--skip-seed", action="store_true", help="Skip historical seeding")
     parser.add_argument("--skip-train", action="store_true", help="Skip model clearing and retraining")
     parser.add_argument("--skip-browser", action="store_true", help="Skip Playwright Chromium (pure Binance feed)")
+    parser.add_argument("--auto-trade-btc", action="store_true", help="Automatically execute a $100 BTCUSDT trade on startup to verify Binance PnL sync")
     parser.add_argument("--ui-only", action="store_true", help="Convenience: --skip-seed --skip-train --skip-browser")
     parser.add_argument("--active-strategies", type=str, metavar="S2,S3,S6",
                         help="Comma-separated strategies to ENABLE (e.g., S2,S3,S6)")
@@ -1679,7 +1822,7 @@ if __name__ == "__main__":
     # UI-ONLY convenience
     if args.ui_only:
         args.skip_seed = True
-        args.skip_train = True
+        args.skip_train = False  # NEVER skip model training
         args.skip_browser = True
         args.live = True
 
@@ -1718,8 +1861,14 @@ if __name__ == "__main__":
             print(f"\n  ⭐ ENSEMBLE = trades requiring 3+/6 strategy agreement")
             print(f"  Note: Live engine adds risk gov, circuit breakers, MT5 execution")
     elif args.live:
+        os.environ["LIVE_TRADING"] = "1"
+        os.environ["MT5_LIVE"] = "1"
+        LIVE_TRADING = True
+        MT5_LIVE = True
+        EXECUTION_MODE = "LIVE"
         asyncio.run(main_async(skip_seed=args.skip_seed, skip_train=args.skip_train,
                                skip_browser=args.skip_browser,
+                               auto_trade_btc=args.auto_trade_btc,
                                active_strategies=active_strategies))
     else:
         smoke_test()
