@@ -452,8 +452,19 @@ async def run_unified_loop():
     log(" UNIFIED 24/7 AUTONOMOUS RELAY LOOP — SINGLE PROCESS ACTIVE")
     log("======================================================================")
 
+    STATE_FILE = os.path.join(BASE_DIR, "relay_state.json")
     topic_idx = 0
     cycle = 0
+
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r", encoding="utf-8") as f:
+                state = json.load(f)
+                topic_idx = state.get("topic_idx", 0)
+                cycle = state.get("cycle", 0)
+            log(f"Restored loop state: cycle={cycle}, topic_idx={topic_idx} ('{IMPROVEMENT_TOPICS[topic_idx % len(IMPROVEMENT_TOPICS)]['id']}')")
+        except Exception as e:
+            log(f"Failed to load loop state: {e}")
 
     while True:
         cycle += 1
@@ -707,6 +718,14 @@ async def run_unified_loop():
                 log(f"Step 7 COMPLETE: Cycle {cycle} finished. Starting next topic...\n")
                 await capture_visual(page, "STEP7_CYCLE_COMPLETE", f"Cycle {cycle} complete for topic '{topic['id']}'")
                 await asyncio.sleep(5)
+
+                # Save loop state
+                try:
+                    with open(STATE_FILE, "w", encoding="utf-8") as f:
+                        json.dump({"topic_idx": topic_idx, "cycle": cycle}, f, indent=4)
+                    log(f"Saved loop state: cycle={cycle}, topic_idx={topic_idx}")
+                except Exception as e:
+                    log(f"Failed to save loop state: {e}")
 
                 if "--single-run" in sys.argv:
                     log("Single run mode active. Terminating loop.")
