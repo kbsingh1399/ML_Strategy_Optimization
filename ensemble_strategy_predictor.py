@@ -34,7 +34,48 @@ from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Tuple, Optional, Any
 from collections import defaultdict, deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+
+from order_flow_filter import OrderFlowMicrostructureFilter
+
+# ─── 3-STATE VOLATILITY REGIME DETECTION ──────────────────────────────────────
+@dataclass
+class RegimeConfig:
+    """Regime-specific strategy adjustments."""
+    S2_weight_boost: float = 0.0          # Boost CVD-momentum in regime 0
+    S4_weight_boost: float = 0.0          # Boost mean-reversion in regime 0
+    tp_mult_adjust: float = 0.0           # Adjust TP multiplier
+    sl_mult_adjust: float = 0.0           # Adjust SL multiplier
+    risk_multiplier: float = 1.0          # Scale position risk
+    trail_activation_adjust: float = 0.0  # Adjust trail activation
+
+# Per-regime configuration
+REGIME_CONFIGS = {
+    0: RegimeConfig(  # Low-vol mean-reverting
+        S2_weight_boost=0.1,
+        S4_weight_boost=0.2,
+        tp_mult_adjust=-1.0,             # 4.0 -> 3.0 (tighter targets in chop)
+        sl_mult_adjust=-0.5,             # 2.0 -> 1.5 (tighter stops in low vol)
+        risk_multiplier=0.8,             # Slightly reduce risk
+        trail_activation_adjust=-0.3,    # 1.5 -> 1.2 (trail earlier)
+    ),
+    1: RegimeConfig(  # Normal trending — baseline
+        S2_weight_boost=0.0,
+        S4_weight_boost=0.0,
+        tp_mult_adjust=0.0,
+        sl_mult_adjust=0.0,
+        risk_multiplier=1.0,
+        trail_activation_adjust=0.0,
+    ),
+    2: RegimeConfig(  # High-vol spike
+        S2_weight_boost=-0.1,            # Reduce CVD-momentum (whipsaws)
+        S4_weight_boost=-0.2,            # Reduce mean-reversion (trend dominates)
+        tp_mult_adjust=+1.0,             # 4.0 -> 5.0 (wider targets for big moves)
+        sl_mult_adjust=+1.0,             # 2.0 -> 3.0 (wider stops)
+        risk_multiplier=0.5,             # Cut risk in half on spikes
+        trail_activation_adjust=+0.5,    # Trail wider
+    ),
+}
 
 import numpy as np
 import pandas as pd
@@ -93,6 +134,24 @@ def featurize(df: pd.DataFrame, btc_ref: Optional[pd.DataFrame] = None) -> pd.Da
 
     # ATR
     df["atr"] = (df["High"] - df["Low"]).rolling(14, min_periods=1).mean()
+
+    # Funding-Adjusted Momentum (FAM)
+    if "Agg. Funding Rate" in df.columns:
+        funding_rate = df["Agg. Funding Rate"].ffill().fillna(0.0)
+        raw_ret_1h = (df["Close"] / df["Close"].shift(4).replace(0, np.nan)) - 1.0
+        carry_cost = funding_rate * (4.0 / 24.0)
+        df["fam"] = (raw_ret_1h - carry_cost).fillna(0.0)
+    else:
+        df["fam"] = 0.0
+
+    # Microstructure CVD Divergence (Absorption Detector)
+    if "CVD" in df.columns:
+        cvd_delta = df["CVD"].diff(5).fillna(0.0)
+        price_delta = df["Close"].diff(5).fillna(0.0)
+        df["cvd_div"] = np.where((price_delta < 0) & (cvd_delta > 0), 1,
+                        np.where((price_delta > 0) & (cvd_delta < 0), -1, 0))
+    else:
+        df["cvd_div"] = 0
 
     # CVD z-scores and deltas
     if "CVD" in df.columns:
@@ -367,6 +426,22 @@ class EnsembleAggregator:
         self.last_trade_time: Dict[str, datetime] = {}
         self.active_strategies = active_strategies if active_strategies is not None else ALL_STRATEGY_KEYS
         self._eff_min_agree = min(self.cfg.min_agreeing, len(self.active_strategies))
+        self._strategy_r_history: Dict[str, List[float]] = {s: [] for s in ALL_STRATEGY_KEYS}
+
+    def record_strategy_outcome(self, strategy_name: str, r_mult: float):
+        """Record trade R-multiple outcome for dynamic ensemble Sharpe weighting."""
+        with self.lock:
+            if strategy_name in self._strategy_r_history:
+                self._strategy_r_history[strategy_name].append(r_mult)
+                if len(self._strategy_r_history[strategy_name]) > 50:
+                    self._strategy_r_history[strategy_name].pop(0)
+            elif strategy_name == "Ensemble_6Strategy":
+                for s in self.active_strategies:
+                    if s not in self._strategy_r_history:
+                        self._strategy_r_history[s] = []
+                    self._strategy_r_history[s].append(r_mult)
+                    if len(self._strategy_r_history[s]) > 50:
+                        self._strategy_r_history[s].pop(0)
 
     def aggregate(self, strategy_signals: Dict[str, int]) -> Tuple[int, float, int]:
         """
@@ -483,6 +558,11 @@ class EnsembleStrategyPredictor:
         self._last_tick_print: Dict[str, float] = {}
         self._last_model_check_time: float = 0.0
 
+        # Order Flow Microstructure Filters
+        self.order_flow: Dict[str, OrderFlowMicrostructureFilter] = {
+            sym: OrderFlowMicrostructureFilter(symbol=sym) for sym in symbols
+        }
+
         # ─── WARM-UP GATE ──────────────────────────────────────────
         self.warmed_up: bool = False
         self._engine_start_time: float = time.time()
@@ -492,6 +572,19 @@ class EnsembleStrategyPredictor:
         log.info(f"Config: min_confidence={self.cfg.min_confidence}, "
                  f"min_agreeing={self.cfg.min_agreeing}")
         log.info(f"Warm-up gate active — requires {self.cfg.bar_warmup} bars + 30s live ticks")
+
+    def compute_kelly_size(self, symbol: str, confidence: float, capital: float, peak_capital: float, max_dd_pct: float = 0.05) -> float:
+        """Compute dynamic Kelly fraction sizing capped by maximum drawdown constraint."""
+        win_rate = 0.55  # Baseline ensemble win rate
+        b = 2.0         # Reward-to-risk ratio (2:1)
+        q = 1.0 - win_rate
+        kelly_fraction = (win_rate * b - q) / b  # ~0.325
+
+        current_dd = max(0.0, (peak_capital - capital) / peak_capital) if peak_capital > 0 else 0.0
+        dd_factor = max(0.1, 1.0 - (current_dd / max_dd_pct))
+
+        eff_risk = kelly_fraction * 0.5 * confidence * dd_factor
+        return max(0.2, min(2.0, eff_risk * 5.0))  # Scale to risk_mult range
 
     def set_history(self, symbol: str, candles) -> None:
         """Seed candle history from historical data (e.g., from Excel seeding)."""
@@ -559,6 +652,15 @@ class EnsembleStrategyPredictor:
         if price <= 0.0:
             return snap
 
+        # Update order flow microstructure depth from snapshot
+        if symbol in self.order_flow and snap:
+            self.order_flow[symbol].update_depth_from_coinglass(
+                coins_bid=float(getattr(snap, 'coins_bid', 0) or 0),
+                coins_ask=float(getattr(snap, 'coins_ask', 0) or 0),
+                dollars_bid=float(getattr(snap, 'dollars_bid', 0) or 0),
+                dollars_ask=float(getattr(snap, 'dollars_ask', 0) or 0),
+            )
+
         now = time.time()
         open_time = int(now // 900) * 900  # 15-minute bar alignment
 
@@ -578,18 +680,20 @@ class EnsembleStrategyPredictor:
                 if not history or int(history[-1].get("open_time", 0)) != prev_ot:
                     history.append(dict(prev))
 
-            # Start new candle
+            # Start new candle — use Binance kline values, not Coinglass ticks
             row = snapshot_to_candle_row(snap)
             row["open_time"] = open_time
+            # PRESERVE Open from first tick of the bar
+            row["Open"] = price
             self.current_candle[symbol] = row
         else:
             # Update current candle
             candle = self.current_candle[symbol]
             row = snapshot_to_candle_row(snap)
             candle["Close"] = row["Close"]
-            if row["High"] > candle.get("High", 0):
+            if row["High"] > candle.get("High", candle.get("Open", 0)):
                 candle["High"] = row["High"]
-            if row["Low"] < candle.get("Low", float('inf')) or candle.get("Low", 0) == 0.0:
+            if row["Low"] < candle.get("Low", candle.get("Open", float('inf'))) or candle.get("Low", 0) == 0.0:
                 candle["Low"] = row["Low"]
             candle["Volume"] = row["Volume"]
             candle["CVD"] = row["CVD"]
@@ -598,6 +702,12 @@ class EnsembleStrategyPredictor:
             candle["Agg. OI"] = row["Agg. OI"]
             candle["Agg. Funding Rate"] = row["Agg. Funding Rate"]
             candle["Long/Short Ratio (Account)"] = row["Long/Short Ratio (Account)"]
+
+        # GAP 5: Store raw DOM RSI for OOS compatibility
+        if hasattr(snap, 'rsi') or (isinstance(snap, dict) and 'rsi' in snap):
+            rsi_raw = float(snap.rsi) if hasattr(snap, 'rsi') else float(snap.get('rsi', 50.0))
+            if rsi_raw > 0:
+                self.current_candle[symbol]["__rsi_from_dom__"] = rsi_raw
             candle["Bid Qty"] = row["Bid Qty"]
             candle["Ask Qty"] = row["Ask Qty"]
             candle["Delta Qty"] = row["Delta Qty"]
@@ -674,6 +784,13 @@ class EnsembleStrategyPredictor:
             # Compute features
             dff = featurize(df.copy(), btc_ref)
 
+            # GAP 5: Override computed RSI with Coinglass DOM RSI (matches OOS parquet)
+            last_row = df.iloc[-1] if len(df) > 0 else None
+            if last_row is not None and "__rsi_from_dom__" in last_row:
+                dom_rsi = float(last_row["__rsi_from_dom__"])
+                if 0 < dom_rsi < 100:
+                    dff.loc[dff.index[-1], "rsi"] = dom_rsi
+
             # Extract latest values
             atr_val = float(dff['atr'].values[-1])
             if np.isnan(atr_val) or atr_val <= 0:
@@ -689,6 +806,21 @@ class EnsembleStrategyPredictor:
                 sig_arr = strat['fn'](dff)
                 strategy_signals[name] = int(sig_arr[-1])
 
+            # Order Flow Microstructure Liquidation Cascade Feed & Bias Signal
+            if symbol in self.order_flow and atr_val > 0:
+                liql = float(df.iloc[-1].get("Agg. Liq Long", 0)) if "Agg. Liq Long" in df.iloc[-1] else 0.0
+                liqs = float(df.iloc[-1].get("Agg. Liq Short", 0)) if "Agg. Liq Short" in df.iloc[-1] else 0.0
+                cvd = float(df.iloc[-1].get("CVD", 0)) if "CVD" in df.iloc[-1] else 0.0
+                price_delta = float(df.iloc[-1].get("Close", 0) - df.iloc[-2].get("Close", 0)) if len(df) > 1 else 0.0
+                bid_depth = float(df.iloc[-1].get("Bid Qty", 0)) if "Bid Qty" in df.iloc[-1] else 0.0
+                
+                self.order_flow[symbol].update_liquidation_cascade(
+                    liql, liqs, cvd, price_delta, atr_val, bid_depth)
+                
+                of_bias, of_conf = self.order_flow[symbol].get_trade_bias()
+                if of_bias != 0 and of_conf > 0.4:
+                    log.info(f"[OrderFlow Signal] {symbol}: bias={of_bias}, confidence={of_conf:.2f}")
+
             # Aggregate through ensemble
             direction, confidence, agreeing = self.ensemble.aggregate(strategy_signals)
 
@@ -703,7 +835,8 @@ class EnsembleStrategyPredictor:
             elif direction == -1:
                 armed_str = f"SHORT ({confidence:.2f}) [{agreeing}/6]"
 
-            # Cache signal
+            # Cache signal and latest ATR
+            self.latest_atr[symbol] = atr_val
             self._cached_signal[symbol] = {
                 'armed_str': armed_str,
                 'atr_val': atr_val,
@@ -747,10 +880,48 @@ class EnsembleStrategyPredictor:
                     log.warning(f"[{symbol}] STALE DATA: last candle {bar_age}s old. Entry blocked.")
                     return
 
-            # Compute SL/TP levels
-            sl_mult = 2.0  # 2 ATR stop (widened from 1 ATR to survive 15m noise)
-            tp_mult = 4.0  # 4R target (adjusted from 5R to improve hit rate)
-            trail_act = 1.5  # 1.5 ATR trail activation (widened from 0.8)
+            # ─── PRIORITY 3: MULTI-TIMEFRAME CONFIRMATION ───
+            history = list(self.candles_history.get(symbol, deque()))
+            if len(history) >= 50:
+                closes = np.array([h.get('Close', current_price) for h in history[-50:]])
+                sma_50 = np.mean(closes)
+                sma_50_prev = np.mean(closes[:-4]) if len(closes) >= 54 else sma_50
+                hourly_trend = 1 if sma_50 > sma_50_prev else (-1 if sma_50 < sma_50_prev else 0)
+
+                required_confidence = self.cfg.min_confidence
+                if direction == 1 and hourly_trend == -1:
+                    required_confidence = 0.60
+                elif direction == -1 and hourly_trend == 1:
+                    required_confidence = 0.60
+
+                if confidence < required_confidence:
+                    log.info(f"[{symbol}] Counter-trend signal suppressed: conf {confidence:.2f} < {required_confidence:.2f}")
+                    return
+
+            # ─── PRIORITY 5: WEEKEND / LOW-LIQUIDITY GATE ───
+            from datetime import datetime
+            now_dt = datetime.now()
+            is_weekend = now_dt.weekday() >= 5
+            if is_weekend and agreeing < (self._eff_min_agree + 1):
+                log.info(f"[{symbol}] Weekend gate: {agreeing} agreeing < required {self._eff_min_agree + 1}. Entry blocked.")
+                return
+
+            # ─── PRIORITY 1: DYNAMIC ATR BY VOLATILITY REGIME ───
+            sl_mult = 2.0  # Default 2.0 ATR
+            tp_mult = 4.0
+            trail_act = 1.5
+
+            if history and len(history) >= 20:
+                recent_atrs = np.array([h.get('atr', atr_val) for h in history[-20:]])
+                mean_atr = np.mean(recent_atrs) if len(recent_atrs) > 0 else atr_val
+                atr_ratio = atr_val / mean_atr if mean_atr > 0 else 1.0
+
+                if atr_ratio > 1.4:     # High volatility spike: widen stop to avoid noise
+                    sl_mult = 2.5
+                    tp_mult = 4.5
+                elif atr_ratio < 0.7:   # Low volatility compression: tighten stop for higher R:R
+                    sl_mult = 1.5
+                    tp_mult = 3.5
 
             if direction == 1:
                 sl = current_price - sl_mult * atr_val
@@ -773,13 +944,21 @@ class EnsembleStrategyPredictor:
                 sl = current_price + effective_sl_dist
                 tp = current_price - effective_tp_dist
 
+            # Compute Dynamic Kelly Risk Multiplier
+            try:
+                cap = trade_tracker.current_capital if trade_tracker else 100.0
+                peak = trade_tracker.peak_capital if trade_tracker else 100.0
+                kelly_risk_mult = self.compute_kelly_size(symbol, confidence, cap, peak, max_dd_pct=0.05)
+            except Exception:
+                kelly_risk_mult = 1.0
+
             # Trigger entry via trade tracker
             strategy_name = "Ensemble_6Strategy"
             try:
                 trade_tracker.trigger_entry(
                     symbol, strategy_name, direction, current_price,
                     sl, tp, atr_val, macro,
-                    vol_regime=0.0, risk_mult=1.0,
+                    vol_regime=0.0, risk_mult=kelly_risk_mult,
                     trail_act=trail_act, regime_val=0
                 )
                 log.info(f"[{symbol}] ENTRY: {armed_str} @ {current_price:.2f} "

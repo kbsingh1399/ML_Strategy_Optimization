@@ -410,8 +410,62 @@ class SnapshotStore:
         return dict(self._data)
 
 
-# ─── TRADE TRACKER ────────────────────────────────────────────────────────
+# ─── PORTFOLIO CORRELATION & HEAT RISK MANAGER ──────────────────────────────
+class PortfolioRiskManager:
+    """
+    Portfolio Risk Manager with Correlation & Heat Limits.
+    Calculates rolling correlations and scales position sizes when portfolio heat exceeds threshold.
+    """
+    def __init__(self, symbols: List[str] = None, max_portfolio_heat: float = 0.15, max_corr_threshold: float = 0.70):
+        self.symbols = symbols or SYMBOLS
+        self.max_heat = max_portfolio_heat
+        self.max_corr = max_corr_threshold
+        self.price_history: Dict[str, deque] = {s: deque(maxlen=720) for s in self.symbols}
+        self.lock = threading.RLock()
 
+    def update_price(self, symbol: str, price: float):
+        with self.lock:
+            if symbol in self.price_history and price > 0:
+                self.price_history[symbol].append(price)
+
+    def get_size_multiplier(self, new_symbol: str, new_heat: float, current_heat: Dict[str, float], equity: float) -> float:
+        with self.lock:
+            total_current_heat = sum(current_heat.values())
+            if equity <= 0:
+                return 1.0
+            
+            # Heat check: total heat / equity
+            heat_ratio = (total_current_heat + new_heat) / equity
+            if heat_ratio > self.max_heat:
+                excess = heat_ratio - self.max_heat
+                scale = max(0.0, 1.0 - (excess / self.max_heat))
+                return scale
+            
+            # Correlation scaling
+            if new_symbol not in self.price_history or len(self.price_history[new_symbol]) < 30:
+                return 1.0
+
+            s_returns = pd.Series(list(self.price_history[new_symbol])).pct_change().dropna()
+            if len(s_returns) < 20:
+                return 1.0
+
+            max_c = 0.0
+            for sym, heat in current_heat.items():
+                if sym != new_symbol and heat > 0 and sym in self.price_history and len(self.price_history[sym]) >= 30:
+                    other_ret = pd.Series(list(self.price_history[sym])).pct_change().dropna()
+                    min_l = min(len(s_returns), len(other_ret))
+                    if min_l > 10:
+                        corr = s_returns.iloc[-min_l:].corr(other_ret.iloc[-min_l:])
+                        if not np.isnan(corr) and abs(corr) > max_c:
+                            max_c = abs(corr)
+
+            if max_c > self.max_corr:
+                return max(0.3, 1.0 - (max_c - self.max_corr) * 2.0)
+
+            return 1.0
+
+
+# ─── TRADE TRACKER ────────────────────────────────────────────────────────
 class Engine1TradeTracker:
     """Trade lifecycle manager with risk governor and MT5 dispatch."""
 
@@ -430,10 +484,12 @@ class Engine1TradeTracker:
         self.peak_capital = initial_capital
         self.daily_start_capital = initial_capital
         self.last_rollover_day = datetime.now().strftime("%Y-%m-%d")
+        self.risk_manager = PortfolioRiskManager()
         
+        self.halt_file = BASE_DIR / "emergency_halt.lock"
         self.emergency_halt = False
-        if os.path.exists("emergency_halt.lock"):
-            log.warning("Found emergency_halt.lock! Circuit breaker is ACTIVE from previous run.")
+        if self.halt_file.exists():
+            log.warning(f"[Circuit Breaker] Found {self.halt_file}! Circuit breaker is ACTIVE from previous run. Delete to re-enable.")
             self.emergency_halt = True
 
         # Broker initialization (Binance)
@@ -547,6 +603,74 @@ class Engine1TradeTracker:
                         self.active_trades[t['trade_id']] = t.copy()
             except Exception as e:
                 log.error(f"Failed to load trade history: {e}")
+
+    def reconcile_positions_with_broker(self) -> None:
+        """GAP 10 FIX: Reconcile active_trades state against live exchange positions on startup."""
+        if not self.broker or self.broker.dry_run:
+            return
+
+        try:
+            positions_data = self.broker._request("GET", "/fapi/v2/account", signed=True)
+            if not positions_data or "positions" not in positions_data:
+                return
+
+            exchange_positions = {}
+            for p in positions_data["positions"]:
+                amt = float(p.get("positionAmt", 0.0))
+                if amt != 0.0:
+                    exchange_positions[p["symbol"]] = {
+                        "amount": amt,
+                        "entry_price": float(p.get("entryPrice", 0.0)),
+                        "unrealized_pnl": float(p.get("unrealizedProfit", 0.0)),
+                    }
+
+            with self.lock:
+                active_symbols = {t["symbol"] for t in self.active_trades.values()}
+                
+                # 1. Clear active trades that were closed on exchange while offline
+                for tid, t in list(self.active_trades.items()):
+                    sym = t["symbol"]
+                    if sym not in exchange_positions:
+                        log.warning(f"[RECONCILE] Position {sym} no longer open on Binance. Removing ghost trade {tid}.")
+                        t["exit_price"] = t.get("entry_price", 0.0)
+                        t["exit_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                        t["pnl_usd"] = 0.0
+                        self.history.append(t)
+                        del self.active_trades[tid]
+
+                # 2. Rehydrate positions found on exchange that are missing locally
+                for sym, ex_pos in exchange_positions.items():
+                    if sym not in active_symbols:
+                        trade_id = f"REHYDRATED_{sym}_{int(time.time_ns())}"
+                        direction = 1 if ex_pos["amount"] > 0 else -1
+                        ep = ex_pos["entry_price"]
+                        units = abs(ex_pos["amount"])
+                        
+                        log.info(f"[RECONCILE] Found unmonitored position on Binance: {sym} {'LONG' if direction==1 else 'SHORT'} {units} @ ${ep:.4f}. Rehydrating trade.")
+                        self.active_trades[trade_id] = {
+                            "trade_id": trade_id,
+                            "symbol": sym,
+                            "strategy": "REHYDRATED",
+                            "direction": direction,
+                            "entry_price": ep,
+                            "entry_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "entry_timestamp": time.time(),
+                            "sl": ep * (0.98 if direction == 1 else 1.02),
+                            "tp": ep * (1.04 if direction == 1 else 0.96),
+                            "units": units,
+                            "live_pnl_pct": 0.0,
+                            "live_pnl_usd": ex_pos["unrealized_pnl"],
+                            "atr": ep * 0.01,
+                            "macro": 0,
+                            "vol_regime": 1.0,
+                            "sl_dist": ep * 0.02,
+                            "trail_act": 0.5,
+                            "trail_buf": 0.5,
+                            "is_pending": False,
+                        }
+            self.save_history()
+        except Exception as e:
+            log.error(f"[RECONCILE ERROR] Failed to reconcile exchange positions: {e}")
 
     def save_history(self):
         """Save trade history to disk."""
@@ -666,6 +790,12 @@ class Engine1TradeTracker:
             cap = MAX_UNITS_PER_SYMBOL.get(symbol, float('inf'))
             if units > cap:
                 units = cap
+
+            # GAP 9 FIX: Max Concurrent Open Positions Check across portfolio
+            MAX_CONCURRENT_POSITIONS = 3
+            if len(active_list) >= MAX_CONCURRENT_POSITIONS:
+                log.warning(f"[Risk] Max concurrent positions limit reached ({len(active_list)} >= {MAX_CONCURRENT_POSITIONS}). Rejecting entry for {symbol}.")
+                return
 
             # Portfolio heat check (4% of equity)
             open_stop_risk = 0.0
@@ -805,10 +935,29 @@ class Engine1TradeTracker:
                 entry_price = trade['entry_price']
                 sl_dist = trade.get('sl_dist')
 
-                # Trailing stop logic
+                # Trailing & Breakeven stop logic
                 trail_act = trade.get('trail_act', 1.0)
                 atr_effective = current_atr if current_atr > 0 else trade.get('atr', 0.0)
-                if sl_dist and trail_act > 0.0 and atr_effective > 0:
+                if sl_dist and atr_effective > 0:
+                    # ─── PRIORITY 4: SMART BREAKEVEN STOP AT 0.5R ───
+                    breakeven_r = 0.5
+                    if direction == 1:
+                        cur_r = (current_price - entry_price) / sl_dist
+                        if cur_r >= breakeven_r and sl < entry_price:
+                            new_sl = entry_price * 1.0001  # Move to entry + 1 tick buffer
+                            trade['sl'] = new_sl
+                            sl = new_sl
+                            log.info(f"[{symbol}] Breakeven stop activated at {current_price:.2f} (R={cur_r:.2f}). SL -> {new_sl:.4f}")
+                            broker_modify_jobs.append((trade.get('symbol'), new_sl, trade['tp']))
+                    else:
+                        cur_r = (entry_price - current_price) / sl_dist
+                        if cur_r >= breakeven_r and sl > entry_price:
+                            new_sl = entry_price * 0.9999
+                            trade['sl'] = new_sl
+                            sl = new_sl
+                            log.info(f"[{symbol}] Breakeven stop activated at {current_price:.2f} (R={cur_r:.2f}). SL -> {new_sl:.4f}")
+                            broker_modify_jobs.append((trade.get('symbol'), new_sl, trade['tp']))
+
                     if direction == 1:
                         cur_r = (current_price - entry_price) / sl_dist
                         if cur_r >= trail_act:
@@ -832,6 +981,33 @@ class Engine1TradeTracker:
                 elapsed = time.time() - trade.get('entry_timestamp', time.time())
                 should_close = elapsed >= 86400
                 reason = "TIMEOUT" if should_close else ""
+
+                # ─── TIME-DECAY EXIT ───
+                if not should_close and elapsed >= 28800:  # After 8 hours (30% of max hold)
+                    time_ratio = elapsed / 86400.0
+                    decay_factor = math.exp(-2.0 * time_ratio)
+                    orig_tp_dist = abs(trade['tp'] - entry_price)
+                    decayed_tp_dist = orig_tp_dist * decay_factor
+
+                    if direction == 1:
+                        decayed_tp = entry_price + max(decayed_tp_dist, (current_price - entry_price) * 0.5)
+                        if current_price >= decayed_tp and current_price > entry_price:
+                            should_close = True
+                            reason = f"TIME_DECAY ({int(elapsed//3600)}h)"
+                    else:
+                        decayed_tp = entry_price - max(decayed_tp_dist, (entry_price - current_price) * 0.5)
+                        if current_price <= decayed_tp and current_price < entry_price:
+                            should_close = True
+                            reason = f"TIME_DECAY ({int(elapsed//3600)}h)"
+
+                # ─── VOLATILITY CONTRACTION CHOP EXIT ───
+                if not should_close and current_atr > 0 and trade.get('atr', 0) > 0:
+                    atr_ratio = current_atr / max(trade.get('atr', 0.01), 0.01)
+                    if sl_dist and sl_dist > 0:
+                        profit_r = ((current_price - entry_price) / sl_dist) * (1 if direction == 1 else -1)
+                        if atr_ratio < 0.5 and -0.2 < profit_r < 0.5:
+                            should_close = True
+                            reason = f"VOL_CHOP (ATR_ratio={atr_ratio:.2f})"
 
                 # SL/TP check
                 sl_hit = False
@@ -868,6 +1044,14 @@ class Engine1TradeTracker:
                     self.current_capital += pnl_usd
                     if self.current_capital > self.peak_capital:
                         self.peak_capital = self.current_capital
+
+                    # Record strategy R-multiple for dynamic ensemble Sharpe weighting
+                    strategy = trade.get('strategy', '')
+                    sl_dist = trade.get('sl_dist', 1.0)
+                    if sl_dist > 0 and trade.get('atr', 0) > 0:
+                        r_mult = pnl_usd / max(trade.get('atr', 0.01) * max(trade.get('units', 0.001), 0.001), 0.01)
+                        if hasattr(self, 'predictor') and hasattr(self.predictor, 'ensemble'):
+                            self.predictor.ensemble.record_strategy_outcome(strategy, r_mult)
 
                     # Set re-entry cooldown
                     cooldown_secs = (self.REENTRY_COOLDOWN_TP_SECS if reason == "TP"
@@ -1605,8 +1789,11 @@ def run_backtest(symbol: str, data_dir: Path = None):
         exit_price = c_arr[max_bars - 1]
         bars_held = max_bars - 1 - entry_idx
         for j in range(entry_idx + 1, max_bars):
+            # GAP 3: Add mark buffer (0.05%) to simulate Mark Price divergence from Last Price
+            mark_buffer = entry * 0.0005
+            
             if dr == 1:
-                if l[j] <= current_stop:
+                if (l[j] - mark_buffer) <= current_stop:
                     exit_price = current_stop
                     bars_held = j - entry_idx
                     break
@@ -1619,7 +1806,7 @@ def run_backtest(symbol: str, data_dir: Path = None):
                         if ns > current_stop:
                             current_stop = ns
             else:
-                if h[j] >= current_stop:
+                if (h[j] + mark_buffer) >= current_stop:
                     exit_price = current_stop
                     bars_held = j - entry_idx
                     break
@@ -1666,10 +1853,14 @@ def run_backtest(symbol: str, data_dir: Path = None):
             atr_val = atr_arr[ei]
             if np.isnan(atr_val) or atr_val <= 0:
                 continue
+            # GAP 11 FIX: Symbol-specific fee tier (BTC/ETH: 0.0008, Altcoins: 0.0010)
+            clean_sym = symbol.upper().replace(".P", "")
+            effective_fee = 0.0008 if clean_sym in ("BTCUSDT", "ETHUSDT") else 0.0010
+
             pnl, r_mult, label, bars, mae = simulate_trade_numba(
                 h_arr, l_arr, c_arr, ei, entry, atr_val, dr,
                 config.tp_mult, config.trail_atr, config.risk_per_trade,
-                config.fee_pct, config.initial_capital
+                effective_fee, config.initial_capital
             )
             trades.append({
                 "entry_idx": ei, "direction": dr, "entry": entry,
@@ -1720,7 +1911,7 @@ def run_backtest(symbol: str, data_dir: Path = None):
         pnl, r_mult, label, bars, mae = simulate_trade_numba(
             h_arr, l_arr, c_arr, ei, entry, atr_val, dr,
             config.tp_mult, config.trail_atr, config.risk_per_trade,
-            config.fee_pct, config.initial_capital
+            effective_fee, config.initial_capital
         )
         ensemble_trades.append({
             "entry_idx": ei, "direction": dr, "entry": entry,

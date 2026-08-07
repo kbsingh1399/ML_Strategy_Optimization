@@ -353,6 +353,19 @@ class BinanceBroker:
 
         log.info(f"[BINANCE LIVE] Dispatching {side} {qty} {binance_symbol} @ Market...")
 
+        # GAP 4: Latency Guard Pre-Check
+        try:
+            ticker = self._request("GET", "/fapi/v1/ticker/bookTicker", params={"symbol": binance_symbol})
+            if ticker and "askPrice" in ticker and "bidPrice" in ticker:
+                current_price = float(ticker["askPrice"]) if direction == 1 else float(ticker["bidPrice"])
+                if current_price > 0:
+                    drift = abs(current_price - bin_entry) / bin_entry
+                    if drift > 0.0015:  # 0.15% max drift tolerance
+                        log.error(f"[BINANCE DRIFT REJECT] {binance_symbol} drift {drift:.4%} > 0.15% limit. Aborting.")
+                        return None
+        except Exception as e:
+            log.warning(f"[Binance] Latency guard check failed, proceeding anyway: {e}")
+
         order_params = {
             "symbol": binance_symbol,
             "side": side,
@@ -365,21 +378,38 @@ class BinanceBroker:
             log.error(f"[BINANCE LIVE REJECT] Failed to place market entry for {binance_symbol}")
             return None
 
+        # GAP 7 FIX: Fill Verification
+        status = res.get("status", "")
+        executed_qty = float(res.get("executedQty", 0.0))
+        if status in ("REJECTED", "EXPIRED", "CANCELED") or (status == "NEW" and executed_qty == 0.0):
+            # Double check fill status by querying order endpoint if NEW
+            query_res = self._request("GET", "/fapi/v1/order", params={"symbol": binance_symbol, "orderId": res["orderId"]}, signed=True)
+            if query_res:
+                status = query_res.get("status", status)
+                executed_qty = float(query_res.get("executedQty", executed_qty))
+                res["avgPrice"] = query_res.get("avgPrice", res.get("avgPrice", 0.0))
+                res["cumQuote"] = query_res.get("cumQuote", res.get("cumQuote", 0.0))
+
+        if status not in ("FILLED", "PARTIALLY_FILLED") and executed_qty == 0.0:
+            log.error(f"[BINANCE UNVERIFIED FILL] Order {res.get('orderId')} status={status}, executedQty={executed_qty}. Aborting trade.")
+            return None
+
         order_id = int(res["orderId"])
-        avg_price = float(res.get("avgPrice", entry_price))
+        cum_quote = float(res.get("cumQuote", 0.0))
+        avg_price = (cum_quote / executed_qty) if executed_qty > 0 and cum_quote > 0 else float(res.get("avgPrice", entry_price))
         if avg_price == 0.0:
             avg_price = entry_price
 
+        # GAP 2: Dollar-distance SL/TP locking
+        sl_dist = abs(entry_price - sl_price)
+        tp_dist = abs(tp_price - entry_price)
+
         if direction == 1:
-            sl_dist_pct = abs(entry_price - sl_price) / entry_price
-            tp_dist_pct = abs(tp_price - entry_price) / entry_price
-            final_sl = self._format_price(binance_symbol, avg_price * (1.0 - sl_dist_pct), "down")
-            final_tp = self._format_price(binance_symbol, avg_price * (1.0 + tp_dist_pct), "nearest")
+            final_sl = self._format_price(binance_symbol, avg_price - sl_dist, "down")
+            final_tp = self._format_price(binance_symbol, avg_price + tp_dist, "nearest")
         else:
-            sl_dist_pct = abs(sl_price - entry_price) / entry_price
-            tp_dist_pct = abs(entry_price - tp_price) / entry_price
-            final_sl = self._format_price(binance_symbol, avg_price * (1.0 + sl_dist_pct), "up")
-            final_tp = self._format_price(binance_symbol, avg_price * (1.0 - tp_dist_pct), "nearest")
+            final_sl = self._format_price(binance_symbol, avg_price + sl_dist, "up")
+            final_tp = self._format_price(binance_symbol, avg_price - tp_dist, "nearest")
 
         sl_res = None
         try:
@@ -397,7 +427,7 @@ class BinanceBroker:
         except Exception as e:
             log.warning(f"[Binance] TP algo order exception: {e}")
 
-        log.info(f"[BINANCE LIVE SUCCESS] Fill: {binance_symbol} {side} {qty} @ ${avg_price:,.2f} (orderId={order_id})")
+        log.info(f"[BINANCE LIVE SUCCESS] Fill: {binance_symbol} {side} {executed_qty} @ ${avg_price:,.2f} (orderId={order_id})")
 
         return {
             "symbol": binance_symbol,
@@ -405,7 +435,7 @@ class BinanceBroker:
             "entry_price": avg_price,
             "sl_price": final_sl,
             "tp_price": final_tp,
-            "lot": qty,
+            "lot": executed_qty,
             "basis_pct": 0.0,
             "is_pending": False,
         }
@@ -422,12 +452,10 @@ class BinanceBroker:
             log.warning(f"[BINANCE LIVE] Failed to cancel algo orders for {binance_symbol}: {e}")
 
     def modify_sltp(self, binance_symbol: str, position_ticket: int, sl: float, tp: float) -> bool:
-        """Modify open SL/TP orders for symbol on Binance."""
+        """Modify open SL/TP orders for symbol on Binance safely without naked window."""
         if self.dry_run:
             log.info(f"[BINANCE DRY RUN] Modify SLTP {binance_symbol} SL={sl} TP={tp}")
             return True
-
-        self._cancel_all_orders(binance_symbol)
 
         positions = self._request("GET", "/fapi/v2/account", signed=True)
         if not positions or "positions" not in positions:
@@ -436,20 +464,39 @@ class BinanceBroker:
         pos_amt = 0.0
         for p in positions["positions"]:
             if p["symbol"] == binance_symbol:
-                pos_amt = float(p.get("positionAmt", 0.0))
+                pos_amt = float(p["positionAmt"])
                 break
 
         if pos_amt == 0.0:
-            return True
+            log.warning(f"[Binance] Cannot modify SL/TP: No open position for {binance_symbol}")
+            return False
 
         opposite_side = "SELL" if pos_amt > 0 else "BUY"
-        final_sl = self._format_price(binance_symbol, sl)
-        final_tp = self._format_price(binance_symbol, tp)
+        formatted_sl = self._format_price(binance_symbol, sl)
+        formatted_tp = self._format_price(binance_symbol, tp)
 
-        self._place_algo_conditional(binance_symbol, opposite_side, "STOP_MARKET", final_sl, "SL")
-        self._place_algo_conditional(binance_symbol, opposite_side, "TAKE_PROFIT_MARKET", final_tp, "TP")
+        # GAP 8 FIX: Place new SL order FIRST before canceling old ones to avoid naked position window
+        new_sl_res = self._place_algo_conditional(binance_symbol, opposite_side, "STOP_MARKET", formatted_sl, "NEW_SL")
+        if not new_sl_res or ("algoId" not in new_sl_res and "clientAlgoId" not in new_sl_res):
+            log.critical(f"[BINANCE NAKED GUARD] SL modification FAILED for {binance_symbol} — emergency closing position!")
+            self.close_position(binance_symbol, "SL_MOD_FAILED")
+            return False
 
-        log.info(f"[BINANCE LIVE] SLTP Modified for {binance_symbol}: SL={final_sl} TP={final_tp}")
+        # Place new TP order
+        self._place_algo_conditional(binance_symbol, opposite_side, "TAKE_PROFIT_MARKET", formatted_tp, "NEW_TP")
+
+        # Now clean up old algo orders except the newly created ones
+        new_sl_id = new_sl_res.get("algoId")
+        try:
+            open_algos = self._request("GET", "/fapi/v1/openAlgoOrders", params={"symbol": binance_symbol}, signed=True)
+            if open_algos:
+                for algo in open_algos:
+                    if algo.get("algoId") != new_sl_id:
+                        self._request("DELETE", "/fapi/v1/algoOrder", params={"symbol": binance_symbol, "algoId": algo["algoId"]}, signed=True)
+        except Exception as e:
+            log.warning(f"[Binance] Exception cleaning old algo orders during modify_sltp: {e}")
+
+        log.info(f"[BINANCE LIVE] SLTP Modified for {binance_symbol}: SL={formatted_sl} TP={formatted_tp}")
         return True
 
     def close_position(self, symbol: str, reason: str = "ENGINE_EXIT") -> bool:

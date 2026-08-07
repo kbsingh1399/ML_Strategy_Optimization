@@ -34,3 +34,19 @@ engine_log.txt
 .agents/
 scratch/
 
+# Environment variables and API keys
+.env
+*_secrets.*
+binance_config.json
+
+# Relay scratch runtime state
+send_to_arena.txt
+arena_latest_copied_response.txt
+arena_latest_response.txt
+arena_output.txt
+clipboard_response.txt
+latest_response_text.txt
+relay_state.json
+chrome_profile*
+*.html
+
