@@ -561,6 +561,17 @@ class CoinglassTab:
 
         while self.running:
             try:
+                if self.page.is_closed():
+                    log.warning(f"[{self.tab_id}] Page is closed! Attempting auto-restart...")
+                    self.page = await self.context.new_page()
+                    await self._route_page(self.page)
+                    await self.page.goto(self.url, wait_until="domcontentloaded", timeout=60000)
+                    self.poll_failures = 0
+                    continue
+            except Exception as e:
+                log.debug(f"[{self.tab_id}] [POLL ERROR] is_closed check failed: {e}")
+
+            try:
                 results = await asyncio.gather(*[_fetch_frame(i) for i in range(1, 10)], return_exceptions=True)
                 has_success = False
                 for r in results:
@@ -576,8 +587,8 @@ class CoinglassTab:
                 else:
                     self.poll_failures += 1
             except Exception as e:
-                log.debug(f"[{self.tab_id}] [POLL ERROR] Outer: {e}")
-                self.poll_failures += 1
+                log.error(f"[{self.tab_id}] [POLL ERROR] WebSocket/Connection crash: {e}")
+                self.poll_failures += 10  # Accelerate watchdog
             
             if self.poll_failures > 60:
                 if not getattr(self, 'indicators_injected', False):

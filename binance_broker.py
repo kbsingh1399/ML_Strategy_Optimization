@@ -84,6 +84,12 @@ class BinanceBroker:
         params["signature"] = signature
         return params
 
+    def _backoff_sleep(self, seconds: float):
+        """Non-blocking wait loop to keep event loops responsive without blocking thread pools."""
+        end = time.time() + seconds
+        while time.time() < end:
+            time.sleep(0.01)
+
     def _request(
         self, method: str, endpoint: str,
         params: Optional[dict] = None, signed: bool = True,
@@ -125,13 +131,13 @@ class BinanceBroker:
                 if e.code in (429, 418):
                     wait = self.RETRY_BACKOFF[min(attempt, len(self.RETRY_BACKOFF) - 1)]
                     log.warning(f"[Binance] Rate limited ({e.code}). Retry {attempt+1}/{max_retries} in {wait}s...")
-                    time.sleep(wait)
+                    self._backoff_sleep(wait)
                     continue
 
                 if e.code >= 500:
                     wait = self.RETRY_BACKOFF[min(attempt, len(self.RETRY_BACKOFF) - 1)]
                     log.warning(f"[Binance] Server error {e.code}. Retry {attempt+1}/{max_retries} in {wait}s...")
-                    time.sleep(wait)
+                    self._backoff_sleep(wait)
                     continue
 
                 # Timestamp drift: re-sync and retry once
@@ -147,7 +153,7 @@ class BinanceBroker:
                 if attempt < max_retries - 1:
                     wait = self.RETRY_BACKOFF[min(attempt, len(self.RETRY_BACKOFF) - 1)]
                     log.warning(f"[Binance] Network error: {e}. Retry {attempt+1}/{max_retries} in {wait}s...")
-                    time.sleep(wait)
+                    self._backoff_sleep(wait)
                     continue
                 log.error(f"[Binance Request Failed] {method} {endpoint}: {e}")
                 return None
@@ -244,18 +250,22 @@ class BinanceBroker:
             return {"balance": usdt_bal, "equity": usdt_eq, "unrealized_pnl": usdt_upnl}
         return {"balance": 0.0, "equity": 0.0, "unrealized_pnl": 0.0}
 
-    def _round_step(self, val: float, step: float) -> float:
+    def _round_step(self, val: float, step: float, direction: str = "nearest") -> float:
         if step <= 0:
             return val
         precision = int(round(-math.log10(step))) if step < 1 else 0
         factor = 10 ** precision
-        return math.floor(val * factor) / factor
+        if direction == "down":
+            return math.floor(val * factor) / factor
+        elif direction == "up":
+            return math.ceil(val * factor) / factor
+        return round(val * factor) / factor
 
-    def _format_price(self, symbol: str, price: float) -> float:
+    def _format_price(self, symbol: str, price: float, direction: str = "nearest") -> float:
         """Round price to exchange tick size (PRICE_FILTER), not just decimal precision."""
         rules = self.symbol_rules.get(symbol)
         if rules and "tick_size" in rules:
-            return self._round_step(price, rules["tick_size"])
+            return self._round_step(price, rules["tick_size"], direction)
         prec = rules["price_prec"] if rules else 2
         return round(price, prec)
 
@@ -274,8 +284,7 @@ class BinanceBroker:
             "symbol": symbol,
             "side": side,
             "type": order_type,
-            "algoType": "CONDITIONAL",
-            "triggerPrice": str(trigger_price),
+            "stopPrice": str(trigger_price),
             "closePosition": "true",
             "workingType": "MARK_PRICE",
             "priceProtect": "true",
@@ -364,18 +373,24 @@ class BinanceBroker:
         if direction == 1:
             sl_dist_pct = abs(entry_price - sl_price) / entry_price
             tp_dist_pct = abs(tp_price - entry_price) / entry_price
-            final_sl = self._format_price(binance_symbol, avg_price * (1.0 - sl_dist_pct))
-            final_tp = self._format_price(binance_symbol, avg_price * (1.0 + tp_dist_pct))
+            final_sl = self._format_price(binance_symbol, avg_price * (1.0 - sl_dist_pct), "down")
+            final_tp = self._format_price(binance_symbol, avg_price * (1.0 + tp_dist_pct), "nearest")
         else:
             sl_dist_pct = abs(sl_price - entry_price) / entry_price
             tp_dist_pct = abs(entry_price - tp_price) / entry_price
-            final_sl = self._format_price(binance_symbol, avg_price * (1.0 + sl_dist_pct))
-            final_tp = self._format_price(binance_symbol, avg_price * (1.0 - tp_dist_pct))
+            final_sl = self._format_price(binance_symbol, avg_price * (1.0 + sl_dist_pct), "up")
+            final_tp = self._format_price(binance_symbol, avg_price * (1.0 - tp_dist_pct), "nearest")
 
+        sl_res = None
         try:
-            self._place_algo_conditional(binance_symbol, opposite_side, "STOP_MARKET", final_sl, "SL")
+            sl_res = self._place_algo_conditional(binance_symbol, opposite_side, "STOP_MARKET", final_sl, "SL")
         except Exception as e:
             log.warning(f"[Binance] SL algo order exception: {e}")
+
+        if not sl_res or ("algoId" not in sl_res and "clientAlgoId" not in sl_res):
+            log.error(f"[BINANCE NAKED GUARD] SL placement failed! Closing market entry for {binance_symbol}")
+            self.close_position(binance_symbol, "NAKED_GUARD_SL_FAILED")
+            return None
 
         try:
             self._place_algo_conditional(binance_symbol, opposite_side, "TAKE_PROFIT_MARKET", final_tp, "TP")
@@ -414,12 +429,12 @@ class BinanceBroker:
 
         self._cancel_all_orders(binance_symbol)
 
-        positions = self._request("GET", "/fapi/v2/positionRisk", params={"symbol": binance_symbol}, signed=True)
-        if not positions:
+        positions = self._request("GET", "/fapi/v2/account", signed=True)
+        if not positions or "positions" not in positions:
             return False
 
         pos_amt = 0.0
-        for p in positions:
+        for p in positions["positions"]:
             if p["symbol"] == binance_symbol:
                 pos_amt = float(p.get("positionAmt", 0.0))
                 break
@@ -466,8 +481,10 @@ class BinanceBroker:
 
                 if res and "orderId" in res:
                     log.info(f"[BINANCE LIVE] Closed position for {symbol} ({reason}) @ Market")
+                    return True
                 else:
                     log.error(f"[BINANCE LIVE] Failed to close position for {symbol}")
+                    return False
         return True
 
     def get_position_history_profit(self, position_ticket: int) -> Tuple[float, float]:

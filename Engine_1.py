@@ -89,6 +89,7 @@ ALL_SYMBOLS = TAB1_SYMBOLS + TAB2_SYMBOLS
 
 REFRESH_HZ = 2.0
 STALE_NS = 5_000_000_000
+STALE_ENTRY_GUARD_NS = 120_000_000_000
 
 TICK_SIZES = {
     "BTCUSDT": 10.0, "ETHUSDT": 0.25, "SOLUSDT": 0.01, "BNBUSDT": 0.05,
@@ -114,8 +115,8 @@ MAX_UNITS_PER_SYMBOL = {
 class EngineConfig:
     initial_capital: float = 5000.0
     risk_per_trade: float = 10.0  # Halved from $20 to compensate for 2x wider stop loss
-    max_daily_risk: float = 200.0
-    max_drawdown_pct: float = 15.0
+    max_daily_risk: float = 150.0
+    max_drawdown_pct: float = 8.0
     tp_mult: float = 4.0  # Adjusted from 5.0
     trail_atr: float = 1.5  # Adjusted from 0.8
     fee_pct: float = 0.0008
@@ -429,7 +430,11 @@ class Engine1TradeTracker:
         self.peak_capital = initial_capital
         self.daily_start_capital = initial_capital
         self.last_rollover_day = datetime.now().strftime("%Y-%m-%d")
+        
         self.emergency_halt = False
+        if os.path.exists("emergency_halt.lock"):
+            log.warning("Found emergency_halt.lock! Circuit breaker is ACTIVE from previous run.")
+            self.emergency_halt = True
 
         # Broker initialization (Binance)
         self.broker = None
@@ -770,10 +775,19 @@ class Engine1TradeTracker:
             total_dd = ((self.initial_capital - equity) / self.initial_capital * 100.0
                         if self.initial_capital > 0 else 0.0)
 
-            if daily_dd >= 4.5 or total_dd >= 9.0:
+            if daily_dd >= 3.0 or total_dd >= 6.0:
                 if not self.emergency_halt:
                     self.emergency_halt = True
                     log.critical(f"EMERGENCY HALT! Daily DD={daily_dd:.2f}% Total DD={total_dd:.2f}%")
+                    with open("emergency_halt.lock", "w") as f:
+                        f.write(f"Halted at {datetime.now().isoformat()} - DD={daily_dd:.2f}%\n")
+                    # Aggressively close all positions
+                    for tid, t in list(self.active_trades.items()):
+                        try:
+                            if self.broker:
+                                self.broker.close_position(t['symbol'], 'CIRCUIT_BREAKER')
+                        except Exception as e:
+                            log.error(f"[CIRCUIT_BREAKER] Failed to close {t['symbol']}: {e}")
 
     def check_exits(self, symbol: str, current_price: float,
                     current_atr: float = 0.0) -> None:

@@ -737,6 +737,16 @@ class EnsembleStrategyPredictor:
             if has_active:
                 return
 
+            # ── STALE-DATA GUARD: don't fire on frozen snapshots ──
+            last_snap = self.candles_history.get(symbol, deque())
+            if last_snap:
+                last_ts = last_snap[-1].get("open_time", 0)
+                now_bar = int(time.time() // 900) * 900
+                bar_age = now_bar - last_ts
+                if bar_age > 1800:  # 30 minutes (2 candles) — data is stale
+                    log.warning(f"[{symbol}] STALE DATA: last candle {bar_age}s old. Entry blocked.")
+                    return
+
             # Compute SL/TP levels
             sl_mult = 2.0  # 2 ATR stop (widened from 1 ATR to survive 15m noise)
             tp_mult = 4.0  # 4R target (adjusted from 5R to improve hit rate)
