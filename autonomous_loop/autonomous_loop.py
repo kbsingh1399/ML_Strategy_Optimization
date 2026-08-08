@@ -339,10 +339,14 @@ async def send_prompt(page, msg: str) -> bool:
         await asyncio.sleep(1)
 
         clicked = await page.evaluate("""() => {
-            const btn = document.querySelector('button.rounded-full.p-0')
+            const btn = document.querySelector('button[aria-label*="Send"]')
+                     || document.querySelector('button[title*="Send"]')
+                     || document.querySelector('button[type="submit"]')
+                     || document.querySelector('button.rounded-full.p-0')
                      || document.querySelector('button.rounded-full')
-                     || document.querySelector('button[class*="rounded-full"]');
-            if (btn) { btn.click(); return true; }
+                     || document.querySelector('button[class*="rounded-full"]')
+                     || document.querySelector('button:has(svg)');
+            if (btn && !btn.disabled) { btn.click(); return true; }
             return false;
         }""")
         if not clicked:
@@ -724,6 +728,11 @@ async def run_unified_loop():
                 if custom_p:
                     prompt_text = check_header + custom_p
                     log(f"Using dynamic prompt from send_to_arena.txt ({len(prompt_text)} chars)")
+                    done_file = os.path.join(BASE_DIR, "send_to_arena.txt.done")
+                    try:
+                        shutil.move(SEND_FILE, done_file)
+                    except Exception:
+                        pass
                 else:
                     raw_base = f"https://raw.githubusercontent.com/kbsingh1399/ML_Strategy_Optimization/{commit_hash}"
                     prompt_text = (
