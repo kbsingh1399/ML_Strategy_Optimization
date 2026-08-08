@@ -1748,10 +1748,14 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False,
         debug_port = find_free_debug_port(9223)
         log.info(f"[Startup] Chromium Remote Debugging enabled on http://127.0.0.1:{debug_port}")
 
+        chrome_exe = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
+        if not os.path.exists(chrome_exe):
+            chrome_exe = None
+
         try:
             ctx = await pw.chromium.launch_persistent_context(
                 user_data_dir,
-                channel="chrome",
+                executable_path=chrome_exe,
                 headless=False,
                 viewport={"width": 1920, "height": 1080},
                 args=[
@@ -1777,7 +1781,7 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False,
             alt_dir.mkdir(parents=True, exist_ok=True)
             ctx = await pw.chromium.launch_persistent_context(
                 alt_dir,
-                channel="chrome",
+                executable_path=chrome_exe,
                 headless=False,
                 viewport={"width": 1920, "height": 1080},
                 args=[
