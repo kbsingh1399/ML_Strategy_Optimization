@@ -384,7 +384,61 @@ async def is_generating(page) -> bool:
         return False
 
 
-async def get_response_text(page) -> str:
+async def click_copy_button_and_get_clipboard(page) -> str:
+    """Clicks the Arena response Copy button and retrieves raw verbatim markdown from browser clipboard."""
+    try:
+        try:
+            await page.context.grant_permissions(['clipboard-read', 'clipboard-write'])
+        except Exception:
+            pass
+
+        clicked = await page.evaluate("""() => {
+            const proseBlocks = [...document.querySelectorAll('div.prose')].filter(d => !d.className.includes('tiptap'));
+            let container = document;
+            if (proseBlocks.length > 0) {
+                container = proseBlocks[proseBlocks.length - 1].parentElement || document;
+            }
+            const copyBtns = [...container.querySelectorAll('button[aria-label="Copy"], button[title="Copy"], button[aria-label*="copy" i], button[title*="copy" i]')];
+            if (copyBtns.length === 0) {
+                const altBtns = [...container.querySelectorAll('button')].filter(b => {
+                    const txt = (b.innerText || b.textContent || '').toLowerCase();
+                    const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+                    return txt.includes('copy') || aria.includes('copy') || (b.className || '').includes('hover:bg-accent');
+                });
+                copyBtns.push(...altBtns);
+            }
+            if (copyBtns.length > 0) {
+                const targetBtn = copyBtns[copyBtns.length - 1];
+                targetBtn.scrollIntoView({ behavior: 'auto', block: 'center' });
+                targetBtn.click();
+                return true;
+            }
+            return false;
+        }""")
+
+        if clicked:
+            await asyncio.sleep(0.5)
+            text = await page.evaluate("""async () => {
+                try {
+                    return await navigator.clipboard.readText();
+                } catch (e) {
+                    return '';
+                }
+            }""")
+            if text and len(text.strip()) > 0:
+                return text.strip()
+    except Exception as e:
+        log(f"Clipboard copy capture note: {e}")
+    return ""
+
+
+async def get_response_text(page, try_clipboard: bool = False) -> str:
+    """Extracts 100% full response text from Arena.ai via clipboard or DOM extraction."""
+    if try_clipboard:
+        clip_text = await click_copy_button_and_get_clipboard(page)
+        if clip_text and len(clip_text) > 50:
+            return clip_text
+
     try:
         text = await page.evaluate(r"""() => {
             const proseBlocks = [...document.querySelectorAll('div.prose')].filter(d => !d.className.includes('tiptap'));
@@ -404,18 +458,34 @@ async def get_response_text(page) -> str:
             if (document.documentElement) document.documentElement.scrollTop = document.documentElement.scrollHeight;
 
             const clone = lastBlock.cloneNode(true);
+
+            // Strip copy code buttons or header bars inside code blocks so they don't pollute code text
+            const copyCodeBtns = clone.querySelectorAll('button, svg');
+            copyCodeBtns.forEach(btn => btn.remove());
+
             const preTags = clone.querySelectorAll('pre');
             preTags.forEach(pre => {
-                const codeText = pre.innerText || pre.textContent || '';
-                const codeNode = document.createTextNode('\n```python\n' + codeText + '\n```\n');
-                pre.parentNode.replaceChild(codeNode, pre);
+                const codeEl = pre.querySelector('code');
+                let lang = 'python';
+                if (codeEl) {
+                    const cls = codeEl.className || '';
+                    const m = cls.match(/language-(\w+)/);
+                    if (m) lang = m[1];
+                }
+                const codeText = (codeEl ? (codeEl.innerText || codeEl.textContent) : (pre.innerText || pre.textContent)) || '';
+                const codeNode = document.createTextNode('\n```' + lang + '\n' + codeText.trim() + '\n```\n');
+                if (pre.parentNode) {
+                    pre.parentNode.replaceChild(codeNode, pre);
+                }
             });
 
             return (clone.innerText || clone.textContent || '').trim();
         }""")
         return text or ""
-    except Exception:
+    except Exception as e:
+        log(f"get_response_text error: {e}")
         return ""
+
 
 
 def extract_code_blocks(text: str) -> list:
@@ -448,10 +518,10 @@ def run_test_suite() -> tuple:
         if r.returncode != 0: return False, f"SYNTAX FAIL:\n{r.stderr}"
     except Exception as e: return False, f"py_compile error: {e}"
 
-    engine_path = os.path.join(BASE_DIR, "Engine_1.py")
+    engine_path = os.path.join(PROJECT_DIR, "Engine_1.py")
     if os.path.exists(engine_path):
         try:
-            proc = subprocess.Popen([sys.executable, "-u", engine_path, "--test"], cwd=BASE_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
+            proc = subprocess.Popen([sys.executable, "-u", engine_path, "--test"], cwd=PROJECT_DIR, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding="utf-8", errors="replace")
             try:
                 out, _ = proc.communicate(timeout=8)
                 if proc.returncode not in (0, None): return False, f"Engine crashed:\n{out[-300:]}"
@@ -462,6 +532,107 @@ def run_test_suite() -> tuple:
             return False, f"Execution test error: {e}"
 
     return True, "All tests PASS"
+
+
+async def execute_step8_live_verification(page) -> tuple:
+    """
+    Step 8: Run Engine_1 --live, read engine logs, capture visual live terminal screenshot,
+    and verify live execution integrity.
+    """
+    log("Step 8: Launching Engine_1 --live for live execution verification...")
+    engine_path = os.path.join(PROJECT_DIR, "Engine_1.py")
+    if not os.path.exists(engine_path):
+        return False, "Engine_1.py not found"
+
+    proc = None
+    try:
+        proc = subprocess.Popen(
+            [sys.executable, "-u", engine_path, "--live"],
+            cwd=PROJECT_DIR,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace"
+        )
+        log(f"Engine_1 --live launched (PID {proc.pid}). Monitoring logs & Chrome window for 20s...")
+        await asyncio.sleep(20)
+
+        # Capture screenshot of live Chrome/Playwright window or screen
+        if page:
+            await capture_visual(page, "STEP8_LIVE_TERMINAL_VERIFY", "Live Engine_1 execution terminal & Chrome UI check")
+
+        # Read tail of log file
+        engine_log_file = os.path.join(PROJECT_DIR, "engine_log.txt")
+        log_snippet = ""
+        if os.path.exists(engine_log_file):
+            with open(engine_log_file, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+                log_snippet = "".join(lines[-30:])
+
+        if proc.poll() is not None and proc.returncode != 0:
+            log(f"Step 8 FAIL: Engine_1 --live exited prematurely with code {proc.returncode}")
+            return False, f"Engine exited code {proc.returncode}:\n{log_snippet}"
+
+        log(f"Step 8 PASS: Engine_1 --live running cleanly (PID {proc.pid}). Log tail:\n{log_snippet[-300:]}")
+        return True, log_snippet
+    except Exception as e:
+        log(f"Step 8 exception: {e}")
+        return False, str(e)
+    finally:
+        if proc and proc.poll() is None:
+            log("Step 8: Terminating test Engine_1 background process...")
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+
+
+async def execute_step9_prepare_next_prompt(cycle: int, topic: dict, live_pass: bool, live_log: str):
+    """
+    Step 9: Analyze live execution telemetry, update state flags,
+    and generate the next structured review prompt for Arena.ai.
+    """
+    log("Step 9: Preparing next dynamic prompt for Arena.ai based on live verification...")
+    trade_logs_file = os.path.join(PROJECT_DIR, "Engine_1_trade_logs.json")
+    trade_summary = "No active trades recorded."
+    if os.path.exists(trade_logs_file):
+        try:
+            with open(trade_logs_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                trade_summary = f"Total Trades: {len(data.get('trades', []))}, Equity: ${data.get('equity', 5000):.2f}"
+        except Exception:
+            pass
+
+    next_prompt = (
+        f"# ENGINE_1 AUTONOMOUS LIVE VERIFICATION FEEDBACK — CYCLE {cycle}\n\n"
+        f"## Live Verification Status: {'✅ PASSED' if live_pass else '❌ REJECTED'}\n"
+        f"- **Topic Reviewed**: {topic['title']}\n"
+        f"- **Trade Telemetry**: {trade_summary}\n"
+        f"- **Log Output Tail**:\n```text\n{live_log[-500:]}\n```\n\n"
+        f"## Instructions for Arena.ai:\n"
+        f"1. Review the live execution telemetry above.\n"
+        f"2. Suggest next level performance optimizations for {topic['title']}.\n"
+        f"3. Provide code changes with `# TARGET: <filename>` labels.\n"
+        f"4. Print 'This is the Test' and 'Test2' and 'Arena.ai'.\n"
+    )
+
+    send_file = os.path.join(BASE_DIR, "send_to_arena.txt")
+    with open(send_file, "w", encoding="utf-8") as f:
+        f.write(next_prompt)
+
+    state_file = os.path.join(BASE_DIR, "relay_state.json")
+    with open(state_file, "w", encoding="utf-8") as f:
+        json.dump({
+            "cycle": cycle,
+            "topic_id": topic["id"],
+            "live_pass": live_pass,
+            "status": "PROMPT_READY",
+            "updated_at": datetime.now().isoformat()
+        }, f, indent=4)
+
+    log("Step 9 COMPLETE: Next prompt generated into send_to_arena.txt & relay_state.json updated.")
 
 
 async def run_unified_loop():
@@ -666,11 +837,13 @@ async def run_unified_loop():
                     # Completion gate: must have stable ticks OR timeout fallback
                     target_ticks = 3 if copy_btn_captured else STABLE_TICKS_REQUIRED
                     if stable_ticks >= target_ticks:
-                        stable_text = curr_text
+                        clip_text = await get_response_text(page, try_clipboard=True)
+                        stable_text = clip_text if (clip_text and len(clip_text) >= len(curr_text) * 0.7) else curr_text
                         break
 
                     if (time.time() - start_wait) > 180:
-                        stable_text = curr_text
+                        clip_text = await get_response_text(page, try_clipboard=True)
+                        stable_text = clip_text if (clip_text and len(clip_text) >= len(curr_text) * 0.7) else curr_text
                         log("Step 5 TIMEOUT: Wait time exceeded 180s. Forcing completion.")
                         break
 
@@ -678,9 +851,21 @@ async def run_unified_loop():
 
                 log(f"Step 5 COMPLETE: Response captured ({len(stable_text)} chars).")
 
-                # Step 6: Write to local txt file + Parse & Apply Patches + Push to GitHub
+                # Step 6: Write raw text verbatim to RESPONSE_FILE and append to LOG_FILE
                 with open(RESPONSE_FILE, "w", encoding="utf-8") as f:
                     f.write(stable_text)
+
+                try:
+                    ts_log = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    with open(LOG_FILE, "a", encoding="utf-8") as f:
+                        f.write(f"\n{'='*70}\n")
+                        f.write(f"[{ts_log}] [RESPONSE_CAPTURE] CYCLE {cycle} ({topic['id']}) | {len(stable_text)} CHARS VERBATIM\n")
+                        f.write(f"{'='*70}\n")
+                        f.write(stable_text)
+                        f.write(f"\n{'='*70}\n\n")
+                    log(f"Verbatim response ({len(stable_text)} chars) written to RESPONSE_FILE and appended to LOG_FILE.")
+                except Exception as e_log:
+                    log(f"Error writing verbatim response to LOG_FILE: {e_log}")
 
                 patches = extract_code_blocks(stable_text)
                 log(f"Step 6: Extracted {len(patches)} code patch candidate(s).")
@@ -736,15 +921,22 @@ async def run_unified_loop():
                     log("Step 6: No code patches in response. Pushing sync commit...")
                     git_push(msg_label=f"Cycle-{cycle}-discussion")
 
-                # Step 7: Completed. Next topic in loop...
-                log(f"Step 7 COMPLETE: Cycle {cycle} finished. Starting next topic...\n")
+                # Step 7: Completed.
+                log(f"Step 7 COMPLETE: Cycle {cycle} code push finished.\n")
                 await capture_visual(page, "STEP7_CYCLE_COMPLETE", f"Cycle {cycle} complete for topic '{topic['id']}'")
-                await asyncio.sleep(5)
+
+                # Step 8: Live Execution Verification (Engine_1 --live & Chrome Screenshot)
+                log("Step 8: Running Engine_1 --live execution verification & live terminal screenshot...")
+                live_pass, live_log = await execute_step8_live_verification(page)
+
+                # Step 9: Review & Next Prompt Preparation
+                log("Step 9: Preparing next dynamic review prompt based on live execution results...")
+                await execute_step9_prepare_next_prompt(cycle, topic, live_pass, live_log)
 
                 # Save loop state
                 try:
                     with open(STATE_FILE, "w", encoding="utf-8") as f:
-                        json.dump({"topic_idx": topic_idx, "cycle": cycle}, f, indent=4)
+                        json.dump({"topic_idx": topic_idx, "cycle": cycle, "status": "CYCLE_FINISHED"}, f, indent=4)
                     log(f"Saved loop state: cycle={cycle}, topic_idx={topic_idx}")
                 except Exception as e:
                     log(f"Failed to save loop state: {e}")
