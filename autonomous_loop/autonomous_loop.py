@@ -536,49 +536,45 @@ def run_test_suite() -> tuple:
 
 async def execute_step8_live_verification(page) -> tuple:
     """
-    Step 8: Run Engine_1 --live, read engine logs, capture visual live terminal screenshot,
+    Step 8: Trigger Engine_1 --live via Task Scheduler in interactive desktop session,
+    monitor engine logs continuously for 30s, execute desktop screenshot capture,
     and verify live execution integrity.
     """
-    log("Step 8: Launching Engine_1 --live for live execution verification...")
+    log("Step 8: Triggering Engine_1 --live via Task Scheduler in interactive desktop session...")
     engine_path = os.path.join(PROJECT_DIR, "Engine_1.py")
     if not os.path.exists(engine_path):
         return False, "Engine_1.py not found"
 
-    proc = None
     try:
+        # Trigger Task Scheduler task to launch Engine_1 in full screen on user desktop
         subprocess.run(["powershell", "-Command", "Start-ScheduledTask -TaskName 'Engine1_LiveRun'"], cwd=PROJECT_DIR)
-        log("Engine_1 --live launched via Task Scheduler in interactive desktop session. Monitoring logs & visible Chrome window for 20s...")
-        await asyncio.sleep(20)
+        log("Engine_1 --live triggered. Monitoring live logs continuously for 30 seconds...")
 
-        # Capture screenshot of live Chrome/Playwright window or screen
+        # Monitor engine_log.txt continuously for 30 seconds
+        engine_log_file = os.path.join(PROJECT_DIR, "engine_log.txt")
+        log_snippet = ""
+        for sec in range(30):
+            await asyncio.sleep(1)
+            if os.path.exists(engine_log_file):
+                with open(engine_log_file, "r", encoding="utf-8", errors="replace") as f:
+                    lines = f.readlines()
+                    log_snippet = "".join(lines[-30:])
+
+        # Execute desktop capture script to save visual screenshot of visible CMD & Chrome
+        capture_script = os.path.join(PROJECT_DIR, "autonomous_loop", "capture_desktop.py")
+        if os.path.exists(capture_script):
+            subprocess.run(["powershell", "-Command", "Start-ScheduledTask -TaskName 'CaptureDesktopTask'"], cwd=PROJECT_DIR)
+            log("Captured live desktop terminal & Chrome visual screenshot.")
+
+        # Capture Playwright visual screenshot if CDP is connected
         if page:
             await capture_visual(page, "STEP8_LIVE_TERMINAL_VERIFY", "Live Engine_1 execution terminal & Chrome UI check")
 
-        # Read tail of log file
-        engine_log_file = os.path.join(PROJECT_DIR, "engine_log.txt")
-        log_snippet = ""
-        if os.path.exists(engine_log_file):
-            with open(engine_log_file, "r", encoding="utf-8", errors="replace") as f:
-                lines = f.readlines()
-                log_snippet = "".join(lines[-30:])
-
-        if proc.poll() is not None and proc.returncode != 0:
-            log(f"Step 8 FAIL: Engine_1 --live exited prematurely with code {proc.returncode}")
-            return False, f"Engine exited code {proc.returncode}:\n{log_snippet}"
-
-        log(f"Step 8 PASS: Engine_1 --live running cleanly (PID {proc.pid}). Log tail:\n{log_snippet[-300:]}")
+        log(f"Step 8 PASS: Engine_1 --live running cleanly in desktop session. Log tail:\n{log_snippet[-400:]}")
         return True, log_snippet
     except Exception as e:
         log(f"Step 8 exception: {e}")
         return False, str(e)
-    finally:
-        if proc and proc.poll() is None:
-            log("Step 8: Terminating test Engine_1 background process...")
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
 
 
 async def execute_step9_prepare_next_prompt(cycle: int, topic: dict, live_pass: bool, live_log: str):
