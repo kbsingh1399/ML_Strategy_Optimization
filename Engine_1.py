@@ -1734,26 +1734,49 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False,
                 (user_data_dir / lk).unlink(missing_ok=True)
             except Exception:
                 pass
-        ctx = await pw.chromium.launch_persistent_context(
-            user_data_dir,
-            headless=False,
-            viewport={"width": 1920, "height": 1080},
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--disable-features=CalculateNativeWinOcclusion",
-                "--disable-background-timer-throttling",
-                "--start-maximized",
-                "--remote-debugging-port=9223",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-infobars",
-                "--window-size=1920,1080",
-                "--disable-dev-shm-usage",
-                "--disable-web-security",
-                "--disable-features=IsolateOrigins,site-per-process",
-            ],
-            ignore_default_args=["--enable-automation"],
-        )
+        try:
+            ctx = await pw.chromium.launch_persistent_context(
+                user_data_dir,
+                headless=False,
+                viewport={"width": 1920, "height": 1080},
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-features=CalculateNativeWinOcclusion",
+                    "--disable-background-timer-throttling",
+                    "--start-maximized",
+                    "--remote-debugging-port=9223",
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-infobars",
+                    "--window-size=1920,1080",
+                    "--disable-dev-shm-usage",
+                    "--disable-web-security",
+                    "--disable-features=IsolateOrigins,site-per-process",
+                ],
+                ignore_default_args=["--enable-automation"],
+            )
+        except Exception as e:
+            log.warning(f"[Startup] Primary chrome_profile locked ({e}). Attempting launch with isolated profile directory...")
+            alt_dir = BASE_DIR / f"chrome_profile_live_{os.getpid()}"
+            alt_dir.mkdir(parents=True, exist_ok=True)
+            ctx = await pw.chromium.launch_persistent_context(
+                alt_dir,
+                headless=False,
+                viewport={"width": 1920, "height": 1080},
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--disable-features=CalculateNativeWinOcclusion",
+                    "--disable-background-timer-throttling",
+                    "--start-maximized",
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-infobars",
+                    "--window-size=1920,1080",
+                    "--disable-dev-shm-usage",
+                    "--disable-web-security",
+                ],
+                ignore_default_args=["--enable-automation"],
+            )
         
         # Apply stealth patches to every page
         ctx.on("page", lambda page: page.add_init_script("""

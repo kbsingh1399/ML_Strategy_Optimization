@@ -1241,7 +1241,7 @@ def train_all_strategies():
             all_combos[(tp, trail)] = {"S1_Liquidation": [], "S2_CVD": [], "S3_Trend": [], "ML_Vwap_Reversal": [], "S5_Microstructure": [], "S6_SMC_Orderflow": []}
 
     for sym in SYMBOLS:
-        print(f"  Processing {sym}...")
+        print(f"  Processing {sym}...", flush=True)
         df = load_asset(sym)
         if df.empty: continue
         ref = btc_ref if sym != "BTCUSDT" else None
@@ -1265,7 +1265,7 @@ def train_all_strategies():
                 all_combos[(tp, trail)]["S5_Microstructure"].extend(trades_micro["S5_Microstructure"])
                 all_combos[(tp, trail)]["S6_SMC_Orderflow"].extend(trades_smc["S6_SMC_Orderflow"])
                 
-        del df_std, df_vwap, df_micro, df_smc, df
+        del df_std, df_vwap, df_micro, df_smc
         gc.collect()
 
     print("\n[3/3] Training Standalone Ensemble Models with Optuna TPE Hyperparameter Tuning...")
