@@ -770,7 +770,15 @@ async def run_unified_loop():
         ARENA_CHAT_URL = "https://arena.ai/agent/019fbc51-76db-79e8-b0d2-c8da2966516a"
         try:
             async with async_playwright() as pw:
-                browser = await pw.chromium.connect_over_cdp(CDP_URL)
+                browser = None
+                try:
+                    browser = await pw.chromium.connect_over_cdp(CDP_URL)
+                except Exception as cdp_err:
+                    log(f"CDP connection issue ({cdp_err}). Auto-recovering Chrome instance on port 19022...")
+                    subprocess.run(["powershell", "-Command", "Remove-Item '$env:LOCALAPPDATA\\Google\\Chrome\\User Data_Arena\\LOCK' -Force -ErrorAction SilentlyContinue; Start-ScheduledTask -TaskName 'StartArenaChromeTask'"], cwd=PROJECT_DIR)
+                    await asyncio.sleep(4)
+                    browser = await pw.chromium.connect_over_cdp(CDP_URL)
+
                 page = None
                 if browser.contexts:
                     for p in browser.contexts[0].pages:
