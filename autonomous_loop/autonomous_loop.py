@@ -683,25 +683,36 @@ async def run_unified_loop():
     log("======================================================================")
 
     STATE_FILE = os.path.join(BASE_DIR, "relay_state.json")
-    topic_idx = 0
+    topic_idx = 1
     cycle = 0
+    last_phase0_ts = 0
 
     if os.path.exists(STATE_FILE):
         try:
             with open(STATE_FILE, "r", encoding="utf-8") as f:
                 state = json.load(f)
-                topic_idx = state.get("topic_idx", 0)
+                topic_idx = state.get("topic_idx", 1)
                 cycle = state.get("cycle", 0)
-            log(f"Restored loop state: cycle={cycle}, topic_idx={topic_idx} ('{IMPROVEMENT_TOPICS[topic_idx % len(IMPROVEMENT_TOPICS)]['id']}')")
+                last_phase0_ts = state.get("last_phase0_ts", 0)
+            log(f"Restored loop state: cycle={cycle}, topic_idx={topic_idx}, last_phase0_ts={last_phase0_ts}")
         except Exception as e:
             log(f"Failed to load loop state: {e}")
 
     while True:
         cycle += 1
-        topic = IMPROVEMENT_TOPICS[topic_idx % len(IMPROVEMENT_TOPICS)]
-        topic_idx += 1
-
-        log(f"\n--- CYCLE {cycle}: {topic['title']} ---")
+        now_ts = time.time()
+        # Phase 0 Gate: Run Phase 0 once every 1 hour (3600s), otherwise run topic optimization
+        if (now_ts - last_phase0_ts) >= 3600:
+            topic = IMPROVEMENT_TOPICS[0]  # Phase 0: git_handshake_alignment
+            last_phase0_ts = now_ts
+            log("Phase 0 Cadence Gate: >1 hour since last check — Running Phase 0 Git Synchronization Handshake...")
+        else:
+            if topic_idx <= 0 or topic_idx >= len(IMPROVEMENT_TOPICS):
+                topic_idx = 1
+            topic = IMPROVEMENT_TOPICS[topic_idx]
+            topic_idx = (topic_idx % (len(IMPROVEMENT_TOPICS) - 1)) + 1
+            mins_ago = int((now_ts - last_phase0_ts) / 60)
+            log(f"Phase 0 Cadence Gate: Last checked {mins_ago}m ago (<1 hour) — Skipping Phase 0 & running Topic Cycle {cycle}: '{topic['title']}'...")
 
         # Step 2: Build prompt (check send_to_arena.txt override first)
         try:
@@ -1000,8 +1011,8 @@ async def run_unified_loop():
                 # Save loop state
                 try:
                     with open(STATE_FILE, "w", encoding="utf-8") as f:
-                        json.dump({"topic_idx": topic_idx, "cycle": cycle, "status": "CYCLE_FINISHED"}, f, indent=4)
-                    log(f"Saved loop state: cycle={cycle}, topic_idx={topic_idx}")
+                        json.dump({"topic_idx": topic_idx, "cycle": cycle, "last_phase0_ts": last_phase0_ts, "status": "CYCLE_FINISHED"}, f, indent=4)
+                    log(f"Saved loop state: cycle={cycle}, topic_idx={topic_idx}, last_phase0_ts={last_phase0_ts}")
                 except Exception as e:
                     log(f"Failed to save loop state: {e}")
 
