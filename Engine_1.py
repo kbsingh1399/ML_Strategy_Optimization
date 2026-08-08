@@ -1734,6 +1734,20 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False,
                 (user_data_dir / lk).unlink(missing_ok=True)
             except Exception:
                 pass
+        import socket
+        def find_free_debug_port(preferred: int = 9223) -> int:
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(('127.0.0.1', preferred))
+                    return preferred
+            except Exception:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                    s.bind(('127.0.0.1', 0))
+                    return s.getsockname()[1]
+
+        debug_port = find_free_debug_port(9223)
+        log.info(f"[Startup] Chromium Remote Debugging enabled on http://127.0.0.1:{debug_port}")
+
         try:
             ctx = await pw.chromium.launch_persistent_context(
                 user_data_dir,
@@ -1744,7 +1758,7 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False,
                     "--disable-features=CalculateNativeWinOcclusion",
                     "--disable-background-timer-throttling",
                     "--start-maximized",
-                    "--remote-debugging-port=9223",
+                    f"--remote-debugging-port={debug_port}",
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
                     "--disable-infobars",
@@ -1756,7 +1770,8 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False,
                 ignore_default_args=["--enable-automation"],
             )
         except Exception as e:
-            log.warning(f"[Startup] Primary chrome_profile locked ({e}). Attempting launch with isolated profile directory...")
+            debug_port = find_free_debug_port(9224)
+            log.warning(f"[Startup] Primary chrome_profile locked ({e}). Attempting launch with isolated profile directory on debug port {debug_port}...")
             alt_dir = BASE_DIR / f"chrome_profile_live_{os.getpid()}"
             alt_dir.mkdir(parents=True, exist_ok=True)
             ctx = await pw.chromium.launch_persistent_context(
@@ -1768,6 +1783,7 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False,
                     "--disable-features=CalculateNativeWinOcclusion",
                     "--disable-background-timer-throttling",
                     "--start-maximized",
+                    f"--remote-debugging-port={debug_port}",
                     "--no-sandbox",
                     "--disable-setuid-sandbox",
                     "--disable-infobars",
