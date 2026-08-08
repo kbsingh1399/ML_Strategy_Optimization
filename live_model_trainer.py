@@ -1240,10 +1240,12 @@ def train_all_strategies():
         for trail in TRAIL_ATR_OPTIONS:
             all_combos[(tp, trail)] = {"S1_Liquidation": [], "S2_CVD": [], "S3_Trend": [], "ML_Vwap_Reversal": [], "S5_Microstructure": [], "S6_SMC_Orderflow": []}
 
-    for sym in SYMBOLS:
-        print(f"  Processing {sym}...", flush=True)
+    for sym_idx, sym in enumerate(SYMBOLS, 1):
+        print(f"  [{sym_idx}/{len(SYMBOLS)}] Generating simulated trade datasets for {sym}...", flush=True)
         df = load_asset(sym)
-        if df.empty: continue
+        if df.empty:
+            print(f"  [WARNING] {sym} dataset is empty — skipping.", flush=True)
+            continue
         ref = btc_ref if sym != "BTCUSDT" else None
         
         df_std = generate_features_standard(df.copy(), ref)
@@ -1267,6 +1269,7 @@ def train_all_strategies():
                 
         del df_std, df_vwap, df_micro, df_smc
         gc.collect()
+        print(f"  [OK] [{sym_idx}/{len(SYMBOLS)}] {sym} dataset generation complete.", flush=True)
 
     print("\n[3/3] Training Standalone Ensemble Models with Optuna TPE Hyperparameter Tuning...")
     manifest = {}
