@@ -546,12 +546,8 @@ async def execute_step8_live_verification(page) -> tuple:
 
     proc = None
     try:
-        ps_cmd = f"Start-Process powershell -ArgumentList '-NoExit', '-Command', 'Set-Location \"{PROJECT_DIR}\"; python -u Engine_1.py --live --skip-seed --skip-train'"
-        proc = subprocess.Popen(
-            ["powershell", "-Command", ps_cmd],
-            cwd=PROJECT_DIR
-        )
-        log(f"Engine_1 --live launched visibly on user desktop (PID {proc.pid}). Monitoring logs & visible Chrome window for 20s...")
+        subprocess.run(["powershell", "-Command", "Start-ScheduledTask -TaskName 'Engine1_LiveRun'"], cwd=PROJECT_DIR)
+        log("Engine_1 --live launched via Task Scheduler in interactive desktop session. Monitoring logs & visible Chrome window for 20s...")
         await asyncio.sleep(20)
 
         # Capture screenshot of live Chrome/Playwright window or screen
