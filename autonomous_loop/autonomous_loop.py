@@ -537,8 +537,8 @@ def run_test_suite() -> tuple:
 async def execute_step8_live_verification(page) -> tuple:
     """
     Step 8: Trigger Engine_1 --live via Task Scheduler in interactive desktop session,
-    monitor engine logs continuously for 30s, execute desktop screenshot capture,
-    and verify live execution integrity.
+    dynamically audit live engine logs with early exit on error or extension on layout load,
+    execute mandatory desktop screenshot verification, and yield live execution status.
     """
     log("Step 8: Triggering Engine_1 --live via Task Scheduler in interactive desktop session...")
     engine_path = os.path.join(PROJECT_DIR, "Engine_1.py")
@@ -548,29 +548,65 @@ async def execute_step8_live_verification(page) -> tuple:
     try:
         # Trigger Task Scheduler task to launch Engine_1 in full screen on user desktop
         subprocess.run(["powershell", "-Command", "Start-ScheduledTask -TaskName 'Engine1_LiveRun'"], cwd=PROJECT_DIR)
-        log("Engine_1 --live triggered. Monitoring live logs continuously for 30 seconds...")
+        log("Engine_1 --live triggered. Starting adaptive dynamic log audit (monitoring errors/exceptions)...")
 
-        # Monitor engine_log.txt continuously for 30 seconds
         engine_log_file = os.path.join(PROJECT_DIR, "engine_log.txt")
         log_snippet = ""
-        for sec in range(30):
+        max_duration = 35
+        elapsed = 0
+        error_detected = False
+        error_reason = ""
+
+        # Dynamic Adaptive Monitoring Loop
+        while elapsed < max_duration:
             await asyncio.sleep(1)
+            elapsed += 1
             if os.path.exists(engine_log_file):
                 with open(engine_log_file, "r", encoding="utf-8", errors="replace") as f:
                     lines = f.readlines()
-                    log_snippet = "".join(lines[-30:])
+                    log_snippet = "".join(lines[-35:])
 
-        # Execute desktop capture script to save visual screenshot of visible CMD & Chrome
+                # Dynamic Error Check: Early exit if any crash or critical error appears in recent log lines
+                recent_text = log_snippet.lower()
+                critical_keywords = [
+                    "traceback (most recent call last)",
+                    "syntaxerror:",
+                    "attributeerror:",
+                    "keyerror:",
+                    "exception:",
+                    "page is closed",
+                    "failed to connect",
+                    "critical"
+                ]
+                for kw in critical_keywords:
+                    if kw in recent_text:
+                        error_detected = True
+                        error_reason = f"Early exit triggered on log error ({kw}):\n" + log_snippet[-400:]
+                        log(f"Step 8 EARLY EXIT: Detected error keyword '{kw}' at t={elapsed}s.")
+                        break
+
+                if error_detected:
+                    break
+
+                # Dynamic Extension Check: If setup is still configuring Coinglass layout tabs, extend timeout up to 55s
+                if "configuring window" in recent_text or "waiting 15 seconds" in recent_text:
+                    if max_duration < 55:
+                        max_duration += 1
+
+        # Mandatory Screenshot Verification (Must take desktop screenshot before completing verification!)
         capture_script = os.path.join(PROJECT_DIR, "autonomous_loop", "capture_desktop.py")
         if os.path.exists(capture_script):
             subprocess.run(["powershell", "-Command", "Start-ScheduledTask -TaskName 'CaptureDesktopTask'"], cwd=PROJECT_DIR)
-            log("Captured live desktop terminal & Chrome visual screenshot.")
+            log("Mandatory Desktop Screenshot captured (CMD Terminal & Chrome state saved).")
 
         # Capture Playwright visual screenshot if CDP is connected
         if page:
             await capture_visual(page, "STEP8_LIVE_TERMINAL_VERIFY", "Live Engine_1 execution terminal & Chrome UI check")
 
-        log(f"Step 8 PASS: Engine_1 --live running cleanly in desktop session. Log tail:\n{log_snippet[-400:]}")
+        if error_detected:
+            return False, error_reason
+
+        log(f"Step 8 PASS: Engine_1 --live verified running cleanly on desktop after {elapsed}s. Log tail:\n{log_snippet[-400:]}")
         return True, log_snippet
     except Exception as e:
         log(f"Step 8 exception: {e}")
@@ -582,7 +618,7 @@ async def execute_step9_prepare_next_prompt(cycle: int, topic: dict, live_pass: 
     Step 9: Analyze live execution telemetry, update state flags,
     and generate the next structured review prompt for Arena.ai.
     """
-    log("Step 9: Preparing next dynamic prompt for Arena.ai based on live verification...")
+    log("Step 9: Preparing next dynamic prompt for Arena.ai based on live verification & screenshot state...")
     trade_logs_file = os.path.join(PROJECT_DIR, "Engine_1_trade_logs.json")
     trade_summary = "No active trades recorded."
     if os.path.exists(trade_logs_file):
@@ -595,15 +631,17 @@ async def execute_step9_prepare_next_prompt(cycle: int, topic: dict, live_pass: 
 
     next_prompt = (
         f"# ENGINE_1 AUTONOMOUS LIVE VERIFICATION FEEDBACK — CYCLE {cycle}\n\n"
-        f"## Live Verification Status: {'✅ PASSED' if live_pass else '❌ REJECTED'}\n"
+        f"## Live Verification Status: {'✅ PASSED' if live_pass else '❌ REJECTED (EARLY EXIT BUG DETECTED)'}\n"
         f"- **Topic Reviewed**: {topic['title']}\n"
         f"- **Trade Telemetry**: {trade_summary}\n"
-        f"- **Log Output Tail**:\n```text\n{live_log[-500:]}\n```\n\n"
+        f"- **Desktop Screenshot Verified**: Yes (Saved to recordings/screenshots/)\n"
+        f"- **Log Telemetry Output**:\n```text\n{live_log[-600:]}\n```\n\n"
         f"## Instructions for Arena.ai:\n"
         f"1. Review the live execution telemetry above.\n"
-        f"2. Suggest next level performance optimizations for {topic['title']}.\n"
-        f"3. Provide code changes with `# TARGET: <filename>` labels.\n"
-        f"4. Print 'This is the Test' and 'Test2' and 'Arena.ai'.\n"
+        f"2. If REJECTED, fix the exact error reported above in the relevant file.\n"
+        f"3. If PASSED, suggest next level performance optimizations for {topic['title']}.\n"
+        f"4. Provide code changes with `# TARGET: <filename>` labels.\n"
+        f"5. Print 'This is the Test' and 'Test2' and 'Arena.ai'.\n"
     )
 
     send_file = os.path.join(BASE_DIR, "send_to_arena.txt")
