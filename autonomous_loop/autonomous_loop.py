@@ -24,6 +24,7 @@ from datetime import datetime
 from playwright.async_api import async_playwright
 
 BASE_DIR        = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR     = os.path.dirname(BASE_DIR) if os.path.basename(BASE_DIR) == "autonomous_loop" else BASE_DIR
 RESPONSE_FILE   = os.path.join(BASE_DIR, "arena_latest_copied_response.txt")
 LOG_FILE        = os.path.join(BASE_DIR, "arena_history_stream.log")
 CYCLE_LOG       = os.path.join(BASE_DIR, "relay_cycle_log.jsonl")
