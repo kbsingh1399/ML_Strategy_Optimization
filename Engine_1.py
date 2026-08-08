@@ -1796,6 +1796,26 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False,
                 ignore_default_args=["--enable-automation"],
             )
         
+        # Force Windows user32 to restore & unhide Chrome window on taskbar
+        if os.name == "nt":
+            try:
+                import ctypes
+                user32 = ctypes.windll.user32
+                def enum_windows_callback(hwnd, _):
+                    if user32.IsWindowVisible(hwnd):
+                        length = user32.GetWindowTextLengthW(hwnd)
+                        buff = ctypes.create_unicode_buffer(length + 1)
+                        user32.GetWindowTextW(hwnd, buff, length + 1)
+                        title = buff.value
+                        if "Chrome" in title or "Coinglass" in title or "Google Chrome" in title:
+                            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+                            user32.SetForegroundWindow(hwnd)
+                    return True
+                WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_int, ctypes.c_int)
+                user32.EnumWindows(WNDENUMPROC(enum_windows_callback), 0)
+            except Exception:
+                pass
+
         # Apply stealth patches to every page
         ctx.on("page", lambda page: page.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
