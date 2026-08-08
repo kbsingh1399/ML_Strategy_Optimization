@@ -37,7 +37,7 @@ BACKUP_DIR      = os.path.join(BASE_DIR, "patch_backups")
 os.makedirs(SHOTS_DIR, exist_ok=True)
 os.makedirs(TRACES_DIR, exist_ok=True)
 
-CDP_URL = "http://localhost:19022"
+CDP_URL = "http://127.0.0.1:19022"
 GITHUB_REPO = "https://github.com/kbsingh1399/ML_Strategy_Optimization"
 
 CORE_FILES = [
@@ -47,6 +47,17 @@ CORE_FILES = [
 ]
 
 IMPROVEMENT_TOPICS = [
+    {
+        "id": "git_handshake_alignment",
+        "title": "Git Synchronization & Code Sharing Handshake Alignment",
+        "prompt": (
+            "We are establishing initial common ground and verifying full code synchronization via Git.\n"
+            "1. Confirm that you can fetch and read all raw repository files from branch `arena-seeding-fix` or repository `kbsingh1399/coinglass-trading`.\n"
+            "2. Read `autonomous_loop/arena_sync.txt` and confirm that it contains the verification markers ('This is the Test' and 'Test2').\n"
+            "3. Confirm that you have full access to `Engine_1.py`, `binance_broker.py`, `live_model_trainer.py`, `coinglass_scraper.py`, `ensemble_strategy_predictor.py`, and `order_flow_filter.py`.\n"
+            "4. Print 'This is the Test' and 'Test2' and 'Arena.ai' to confirm full synchronization common ground."
+        ),
+    },
     {
         "id": "signal_refinement",
         "title": "Signal Refinement & Alpha Generation",
@@ -756,20 +767,29 @@ async def run_unified_loop():
                 f"{topic['prompt']}"
             )
 
+        ARENA_CHAT_URL = "https://arena.ai/agent/019fbc51-76db-79e8-b0d2-c8da2966516a"
         try:
             async with async_playwright() as pw:
                 browser = await pw.chromium.connect_over_cdp(CDP_URL)
                 page = None
-                for ctx in browser.contexts:
-                    for p in ctx.pages:
-                        if "arena" in p.url.lower():
+                if browser.contexts:
+                    for p in browser.contexts[0].pages:
+                        if "arena.ai" in p.url.lower():
                             page = p
                             break
 
                 if not page:
-                    log("Arena tab not found. Retrying in 10s...")
-                    await asyncio.sleep(10)
-                    continue
+                    if browser.contexts:
+                        page = await browser.contexts[0].new_page()
+                        await page.goto(ARENA_CHAT_URL)
+                        log(f"Opened new Arena chat tab: {ARENA_CHAT_URL}")
+                    else:
+                        log("No active browser contexts on CDP. Retrying in 10s...")
+                        await asyncio.sleep(10)
+                        continue
+                elif "019fbc51-76db-79e8-b0d2-c8da2966516a" not in page.url:
+                    await page.goto(ARENA_CHAT_URL)
+                    log(f"Navigated existing tab to target Arena chat agent: {ARENA_CHAT_URL}")
 
                 # Ensure page and editor elements are completely loaded
                 await wait_for_arena_ready(page)
