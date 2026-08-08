@@ -1,8 +1,8 @@
 {
     "__meta__": {
         "last_entry_bar": {},
-        "daily_start_capital": 4994.16397654,
-        "last_rollover_day": "2026-08-07"
+        "daily_start_capital": 5019.24832011,
+        "last_rollover_day": "2026-08-08"
     },
     "trades": [
         {
@@ -768,7 +768,7 @@
             "entry_price": 6.4,
             "entry_time": "2026-08-07 10:15:01",
             "entry_timestamp": 1786077901.271217,
-            "sl": 6.3742,
+            "sl": 6.424107142857143,
             "tp": 6.5289,
             "units": 387.81163434903357,
             "live_pnl_pct": -0.1718750000000019,
@@ -786,7 +786,12 @@
             "mt5_tp": 6.5289,
             "mt5_lot": 387.0,
             "mfe_pct": 0.0,
-            "mae_pct": -0.20312500000001232
+            "mae_pct": -0.20312500000001232,
+            "exit_price": 6.437,
+            "exit_time": "2026-08-08 14:25:34",
+            "exit_reason": "TIMEOUT",
+            "pnl_pct": 0.5781249999999988,
+            "pnl_usd": 14.349030470914212
         },
         {
             "trade_id": "Ensemble_6Strategy_BTCUSDT_LONG_1786124803349920300",
