@@ -49,9 +49,10 @@ CORE_FILES = [
 IMPROVEMENT_TOPICS = [
     {
         "id": "git_handshake_alignment",
-        "title": "Git Synchronization & Code Sharing Handshake Alignment",
+        "title": "Phase 0: Git Synchronization & Code Sharing Handshake Alignment",
         "prompt": (
-            "We are establishing initial common ground and verifying full code synchronization via Git.\n"
+            "PHASE 0: Initial Common Ground & Code Sharing Verification.\n"
+            "Before we begin iterating on performance optimization topics, we must verify our common ground of sharing via Git:\n"
             "1. Confirm that you can fetch and read all raw repository files from branch `arena-seeding-fix` or repository `kbsingh1399/coinglass-trading`.\n"
             "2. Read `autonomous_loop/arena_sync.txt` and confirm that it contains the verification markers ('This is the Test' and 'Test2').\n"
             "3. Confirm that you have full access to `Engine_1.py`, `binance_broker.py`, `live_model_trainer.py`, `coinglass_scraper.py`, `ensemble_strategy_predictor.py`, and `order_flow_filter.py`.\n"
@@ -60,7 +61,7 @@ IMPROVEMENT_TOPICS = [
     },
     {
         "id": "signal_refinement",
-        "title": "Signal Refinement & Alpha Generation",
+        "title": "Phase 1: Signal Refinement & Alpha Generation",
         "prompt": (
             "Review Engine_1.py trading signals (S1, S2, S3, S4, S5). Suggest:\n"
             "1. Improved entry/exit filters to reduce false signals during choppy regimes.\n"
