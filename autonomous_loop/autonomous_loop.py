@@ -857,26 +857,28 @@ async def run_unified_loop():
                 log("Step 4: Prompt submitted (Send Button Hit). Waiting for Copy button...")
 
                 # Step 5: Wait for Copy Button + Full Code Response Completion Signal
-                await capture_visual(page, "STEP5_WAITING_RESPONSE", "Waiting for response generation...")
+                await capture_visual(page, "STEP5_WAITING_RESPONSE", "Waiting for new response generation...")
                 start_wait = time.time()
                 last_tick_10s = time.time()
                 copy_btn_captured = False
                 stable_text = ""
                 last_len = 0
                 stable_ticks = 0
-                STABLE_TICKS_REQUIRED = 6  # 18s of no text change
+                pre_submit_len = len(await get_response_text(page))
 
                 while True:
-                    await auto_dismiss_modals(page)
+                    dismissed_modal = await auto_dismiss_modals(page)
                     generating = await is_generating(page)
                     copy_btn = await has_copy_button(page)
                     curr_text = await get_response_text(page)
                     code_patches = extract_code_blocks(curr_text)
-                    has_full_patch = any(len(p.get('code', '')) >= 400 for p in code_patches)
 
-                    if copy_btn and not copy_btn_captured:
+                    # Valid new response gate: Text length MUST increase past pre_submit_len OR a feedback modal was dismissed
+                    valid_new_response = (len(curr_text) > pre_submit_len + 30) or dismissed_modal
+
+                    if copy_btn and valid_new_response and not copy_btn_captured:
                         copy_btn_captured = True
-                        await capture_visual(page, "STEP5_COPY_BTN_DETECTED", f"Copy button detected ({len(curr_text)} chars)")
+                        await capture_visual(page, "STEP5_COPY_BTN_DETECTED", f"Copy button detected for NEW response ({len(curr_text)} chars)")
 
                     now = time.time()
                     if now - last_tick_10s >= 10:
@@ -886,40 +888,38 @@ async def run_unified_loop():
                     # Check for active thinking / streaming
                     is_thinking = "thinking" in curr_text.lower() and len(curr_text) < 1500
 
-                    if generating or is_thinking:
+                    if not valid_new_response or generating or is_thinking:
                         stable_ticks = 0
-                        log(f"Arena streaming/thinking... ({len(curr_text)} chars so far)")
+                        log(f"Arena generating new response... (current len: {len(curr_text)}, pre-submit len: {pre_submit_len})")
                     elif copy_btn and len(curr_text) == last_len:
                         stable_ticks += 1
-                        # If copy button is detected, settle faster (3 ticks instead of 6) to save tokens/time
-                        target_ticks = 3 if copy_btn_captured else STABLE_TICKS_REQUIRED
-                        log(f"Response stable tick {stable_ticks}/{target_ticks} — {len(curr_text)} chars ({len(code_patches)} patches)")
+                        target_ticks = 4
+                        log(f"New response stable tick {stable_ticks}/{target_ticks} — {len(curr_text)} chars")
                     else:
                         stable_ticks = 0
 
-                    # Dynamic Timer Logic: Adapt sleep interval based on streaming activity
                     sleep_interval = 1.0
                     char_diff = len(curr_text) - last_len
                     if generating or is_thinking or char_diff > 100:
-                        sleep_interval = 0.5  # Poll faster during rapid generation
+                        sleep_interval = 0.5
                     elif char_diff > 0:
-                        sleep_interval = 1.5  # Standard streaming poll
+                        sleep_interval = 1.5
                     else:
-                        sleep_interval = 3.0  # Slow down when stalled or completed
+                        sleep_interval = 3.0
 
                     last_len = len(curr_text)
 
-                    # Completion gate: must have stable ticks OR timeout fallback
-                    target_ticks = 3 if copy_btn_captured else STABLE_TICKS_REQUIRED
-                    if stable_ticks >= target_ticks:
+                    # Completion gate: must have 4 stable ticks for valid new response OR dismissed feedback modal
+                    if (valid_new_response and stable_ticks >= 4) or dismissed_modal:
                         clip_text = await get_response_text(page, try_clipboard=True)
                         stable_text = clip_text if (clip_text and len(clip_text) >= len(curr_text) * 0.7) else curr_text
+                        log(f"Step 5 SUCCESS: Captured full new response ({len(stable_text)} chars).")
                         break
 
-                    if (time.time() - start_wait) > 180:
+                    if (time.time() - start_wait) > 240:
                         clip_text = await get_response_text(page, try_clipboard=True)
                         stable_text = clip_text if (clip_text and len(clip_text) >= len(curr_text) * 0.7) else curr_text
-                        log("Step 5 TIMEOUT: Wait time exceeded 180s. Forcing completion.")
+                        log("Step 5 TIMEOUT: Wait time exceeded 240s. Forcing completion.")
                         break
 
                     await asyncio.sleep(sleep_interval)
