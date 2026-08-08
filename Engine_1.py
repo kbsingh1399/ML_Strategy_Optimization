@@ -1751,6 +1751,7 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False,
         try:
             ctx = await pw.chromium.launch_persistent_context(
                 user_data_dir,
+                channel="chrome",
                 headless=False,
                 viewport={"width": 1920, "height": 1080},
                 args=[
@@ -1776,6 +1777,7 @@ async def main_async(skip_seed: bool = False, skip_train: bool = False,
             alt_dir.mkdir(parents=True, exist_ok=True)
             ctx = await pw.chromium.launch_persistent_context(
                 alt_dir,
+                channel="chrome",
                 headless=False,
                 viewport={"width": 1920, "height": 1080},
                 args=[
