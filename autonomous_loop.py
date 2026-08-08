@@ -359,12 +359,25 @@ async def has_copy_button(page) -> bool:
 async def is_generating(page) -> bool:
     try:
         return bool(await page.evaluate("""() => {
-            const stopBtn = [...document.querySelectorAll('button')].find(b => {
-                const title = (b.getAttribute('title') || '').toLowerCase();
-                const aria = (b.getAttribute('aria-label') || '').toLowerCase();
-                return title.includes('stop') || aria.includes('stop');
-            });
-            return !!stopBtn;
+            const loader = document.querySelector('.animate-spin') 
+                        || document.querySelector('[class*="spinner"]')
+                        || document.querySelector('[class*="loading"]');
+            if (loader) return true;
+            
+            const editor = document.querySelector('[contenteditable="true"]');
+            if (editor && editor.getAttribute('aria-disabled') === 'true') {
+                return true;
+            }
+            
+            const prose = [...document.querySelectorAll('div.prose')].filter(d => !d.className.includes('tiptap'));
+            if (prose.length > 0) {
+                const copyBtns = [...document.querySelectorAll('button')].filter(b => {
+                    const aria = (b.getAttribute('aria-label') || '').toLowerCase();
+                    return aria.includes('copy');
+                });
+                if (copyBtns.length === 0) return true;
+            }
+            return false;
         }"""))
     except Exception:
         return False
